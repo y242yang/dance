@@ -1,0 +1,51 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Claude Code
+.claude/
+
+# Environment / secrets
+.env
+.env.*
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Playwright
+scraper/scrapers/__pycache__/
+
+# Xcode
+ios/Dance.xcodeproj/xcuserdata/
+ios/Dance.xcodeproj/project.xcworkspace/xcuserdata/
+ios/*.xcworkspace/xcuserdata/
+ios/DerivedData/
+ios/*.ipa
+ios/*.dSYM.zip
+ios/*.dSYM
+*.xccheckout
+*.moved-aside
+*.xcuserstate
+
+# Swift Package Manager resolved (keep Package.swift but ignore .resolved if desired)
+# ios/Dance.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+# CocoaPods (not used but just in case)
+ios/Pods/
+
+# Fastlane
+ios/fastlane/report.xml
+ios/fastlane/Preview.html
+ios/fastlane/screenshots
+ios/fastlane/test_output

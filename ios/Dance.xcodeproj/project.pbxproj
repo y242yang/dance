@@ -1,0 +1,397 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		661A9D34C6E18B8CA31C5913 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD57E8B321648F5AD283DB1 /* Models.swift */; };
+		68900186FFFC30129C31B002 /* BrowseClassesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34FBA672549E73CBA0635E9E /* BrowseClassesView.swift */; };
+		68B8701D84A6B91DCACACBBD /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E3DFE42EB18E6A030B6B594 /* ContentView.swift */; };
+		6E2D9AF76A8407C176A3B22A /* ClassListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A49180712B3BD1E5E47EF53 /* ClassListView.swift */; };
+		7874DE850B04393794016788 /* LearnMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A99AC0BDE8DE9246643234 /* LearnMoreView.swift */; };
+		7C7BB3154A75693322662B61 /* SavedStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 40DEADAA1F403B6AA98F1920 /* SavedStore.swift */; };
+		8C8FEE76F536B3E2E8A9C504 /* SavedView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4181904E88699FDE1CD6AE67 /* SavedView.swift */; };
+		9DD7B1F5C1BB06EC512BAA86 /* Supabase in Frameworks */ = {isa = PBXBuildFile; productRef = 03630467F65703E3DA93EF85 /* Supabase */; };
+		A135144F526D02580D32A3BA /* SupabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78398E8CB98F30755AEF78D1 /* SupabaseClient.swift */; };
+		AAF0C8A8E9AFF1C901789FBE /* ClassDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC57E290C3228E8D731A64A9 /* ClassDetailView.swift */; };
+		AE904655E9E1DFE40A7759A1 /* WorkshopsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9EC767F6EE91A9FE2BF070B7 /* WorkshopsView.swift */; };
+		C8E12BCF0E744C6DE2A1FDBA /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3368E91C529AC1233573A5B7 /* HomeView.swift */; };
+		CACD0B3A7421DD7D59AD9A35 /* DanceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91171AA015DE9B3ECB4DED12 /* DanceViewModel.swift */; };
+		D2417E826B09C29D80C6EFF5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F08F656213C5F505DFD10532 /* Assets.xcassets */; };
+		E32DE18E22F3D4EEF2A1D7DC /* LocationClassView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E26DCEE6ED2A624B9F126D8 /* LocationClassView.swift */; };
+		E76FA80CAFACBAD626629DE1 /* DanceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA99371373F8A0470896627F /* DanceApp.swift */; };
+		E856004ACAE56E150EDE5263 /* StudioListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CAB7C33C8C56ADA347F620E /* StudioListView.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		2AD57E8B321648F5AD283DB1 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		3368E91C529AC1233573A5B7 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		34FBA672549E73CBA0635E9E /* BrowseClassesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowseClassesView.swift; sourceTree = "<group>"; };
+		40DEADAA1F403B6AA98F1920 /* SavedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedStore.swift; sourceTree = "<group>"; };
+		4181904E88699FDE1CD6AE67 /* SavedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedView.swift; sourceTree = "<group>"; };
+		5E3DFE42EB18E6A030B6B594 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+		78398E8CB98F30755AEF78D1 /* SupabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClient.swift; sourceTree = "<group>"; };
+		7D07CC2AB5EE6D43C88603C6 /* Dance.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Dance.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8CAB7C33C8C56ADA347F620E /* StudioListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioListView.swift; sourceTree = "<group>"; };
+		8E26DCEE6ED2A624B9F126D8 /* LocationClassView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationClassView.swift; sourceTree = "<group>"; };
+		91171AA015DE9B3ECB4DED12 /* DanceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DanceViewModel.swift; sourceTree = "<group>"; };
+		9A49180712B3BD1E5E47EF53 /* ClassListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassListView.swift; sourceTree = "<group>"; };
+		9EC767F6EE91A9FE2BF070B7 /* WorkshopsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopsView.swift; sourceTree = "<group>"; };
+		BC57E290C3228E8D731A64A9 /* ClassDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassDetailView.swift; sourceTree = "<group>"; };
+		D7A99AC0BDE8DE9246643234 /* LearnMoreView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearnMoreView.swift; sourceTree = "<group>"; };
+		EA99371373F8A0470896627F /* DanceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DanceApp.swift; sourceTree = "<group>"; };
+		F08F656213C5F505DFD10532 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		FA77EB82DBAE7F4B5DFEEBE3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		4227EE0DA5F8C799801E1730 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9DD7B1F5C1BB06EC512BAA86 /* Supabase in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		0963E15836C6C7D250F11997 /* Dance */ = {
+			isa = PBXGroup;
+			children = (
+				F08F656213C5F505DFD10532 /* Assets.xcassets */,
+				34FBA672549E73CBA0635E9E /* BrowseClassesView.swift */,
+				BC57E290C3228E8D731A64A9 /* ClassDetailView.swift */,
+				9A49180712B3BD1E5E47EF53 /* ClassListView.swift */,
+				5E3DFE42EB18E6A030B6B594 /* ContentView.swift */,
+				EA99371373F8A0470896627F /* DanceApp.swift */,
+				91171AA015DE9B3ECB4DED12 /* DanceViewModel.swift */,
+				3368E91C529AC1233573A5B7 /* HomeView.swift */,
+				FA77EB82DBAE7F4B5DFEEBE3 /* Info.plist */,
+				D7A99AC0BDE8DE9246643234 /* LearnMoreView.swift */,
+				8E26DCEE6ED2A624B9F126D8 /* LocationClassView.swift */,
+				2AD57E8B321648F5AD283DB1 /* Models.swift */,
+				40DEADAA1F403B6AA98F1920 /* SavedStore.swift */,
+				4181904E88699FDE1CD6AE67 /* SavedView.swift */,
+				8CAB7C33C8C56ADA347F620E /* StudioListView.swift */,
+				78398E8CB98F30755AEF78D1 /* SupabaseClient.swift */,
+				9EC767F6EE91A9FE2BF070B7 /* WorkshopsView.swift */,
+			);
+			path = Dance;
+			sourceTree = "<group>";
+		};
+		1B3D99700ED665E811A52ED1 = {
+			isa = PBXGroup;
+			children = (
+				0963E15836C6C7D250F11997 /* Dance */,
+				88253E97DD0894868636B3EA /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		88253E97DD0894868636B3EA /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				7D07CC2AB5EE6D43C88603C6 /* Dance.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		429ABEC42A24932EE5E9820C /* Dance */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 996A1A80E9B0DFC4B7341B68 /* Build configuration list for PBXNativeTarget "Dance" */;
+			buildPhases = (
+				6F454C398CF733D9C3E94DC8 /* Sources */,
+				AA71EA6CFA1F23E594E42287 /* Resources */,
+				4227EE0DA5F8C799801E1730 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Dance;
+			packageProductDependencies = (
+				03630467F65703E3DA93EF85 /* Supabase */,
+			);
+			productName = Dance;
+			productReference = 7D07CC2AB5EE6D43C88603C6 /* Dance.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		9C16DC9FCD5AA99CD5C2C837 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = CCBC7B77730AD964EB2C0D0B /* Build configuration list for PBXProject "Dance" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 1B3D99700ED665E811A52ED1;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				32C20AD5BAE99188267714EA /* XCRemoteSwiftPackageReference "supabase-swift" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 88253E97DD0894868636B3EA /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				429ABEC42A24932EE5E9820C /* Dance */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		AA71EA6CFA1F23E594E42287 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				D2417E826B09C29D80C6EFF5 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		6F454C398CF733D9C3E94DC8 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				68900186FFFC30129C31B002 /* BrowseClassesView.swift in Sources */,
+				AAF0C8A8E9AFF1C901789FBE /* ClassDetailView.swift in Sources */,
+				6E2D9AF76A8407C176A3B22A /* ClassListView.swift in Sources */,
+				68B8701D84A6B91DCACACBBD /* ContentView.swift in Sources */,
+				E76FA80CAFACBAD626629DE1 /* DanceApp.swift in Sources */,
+				CACD0B3A7421DD7D59AD9A35 /* DanceViewModel.swift in Sources */,
+				C8E12BCF0E744C6DE2A1FDBA /* HomeView.swift in Sources */,
+				7874DE850B04393794016788 /* LearnMoreView.swift in Sources */,
+				E32DE18E22F3D4EEF2A1D7DC /* LocationClassView.swift in Sources */,
+				661A9D34C6E18B8CA31C5913 /* Models.swift in Sources */,
+				7C7BB3154A75693322662B61 /* SavedStore.swift in Sources */,
+				8C8FEE76F536B3E2E8A9C504 /* SavedView.swift in Sources */,
+				E856004ACAE56E150EDE5263 /* StudioListView.swift in Sources */,
+				A135144F526D02580D32A3BA /* SupabaseClient.swift in Sources */,
+				AE904655E9E1DFE40A7759A1 /* WorkshopsView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1A283AE566DFE18C9EEE3C28 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		60DE45361B4E306F5AFEE38B /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Dance/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.annyang.dance;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		C8C91A1EDFD571C92FA1A7EC /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		DAB2BBA1C21D16DB31ED444A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				ENABLE_PREVIEWS = YES;
+				INFOPLIST_FILE = Dance/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.annyang.dance;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		996A1A80E9B0DFC4B7341B68 /* Build configuration list for PBXNativeTarget "Dance" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				60DE45361B4E306F5AFEE38B /* Debug */,
+				DAB2BBA1C21D16DB31ED444A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CCBC7B77730AD964EB2C0D0B /* Build configuration list for PBXProject "Dance" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C8C91A1EDFD571C92FA1A7EC /* Debug */,
+				1A283AE566DFE18C9EEE3C28 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		32C20AD5BAE99188267714EA /* XCRemoteSwiftPackageReference "supabase-swift" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/supabase/supabase-swift";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.0.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		03630467F65703E3DA93EF85 /* Supabase */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 32C20AD5BAE99188267714EA /* XCRemoteSwiftPackageReference "supabase-swift" */;
+			productName = Supabase;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 9C16DC9FCD5AA99CD5C2C837 /* Project object */;
+}
