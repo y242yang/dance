@@ -1,4 +1,5 @@
 import json
+import re
 import requests as http_requests
 import anthropic
 from datetime import date, timedelta
@@ -96,6 +97,7 @@ def _normalize_style(raw, title: str = "", description: str = "") -> str:
 STUDIO_EXCLUDES = {
     "Enjoy Dance Studio": ["junior"],
     "In The Groove Studios": ["youth", "ages 3", "ages 7", "ages 10", "kids"],
+    "Vell Studio SF": ["intensive"],
 }
 
 
@@ -357,7 +359,11 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
 
             while days_collected < days_ahead:
                 # Mindbody widgets use div[role="button"] for day tiles
-                day_tiles = page.query_selector_all('[role="button"]')
+                # Exclude navigation buttons (Previous, Next, Open calendar)
+                nav_labels = {"next", "previous", "open calendar"}
+                all_btns = page.query_selector_all('[role="button"]')
+                day_tiles = [b for b in all_btns
+                             if (b.get_attribute("aria-label") or "").lower() not in nav_labels]
                 if first_week:
                     # first tile is already selected; skip it
                     day_tiles = list(day_tiles)[1:]
@@ -380,6 +386,42 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
                     if days_collected >= days_ahead:
                         break
 
+                # Try "More times" button (Acuity list view) — use LAST button (loads future)
+                # Extract BOOK button aria-labels: compact, info-dense, ~130 chars each
+                def _acuity_book_labels(pg):
+                    labels = []
+                    for frame in [pg] + list(pg.frames):
+                        try:
+                            btns = frame.query_selector_all('[aria-label^="Book "]')
+                            labels += [b.get_attribute("aria-label") for b in btns if b.get_attribute("aria-label")]
+                        except Exception:
+                            pass
+                    return "\n".join(labels)
+
+                more_btns = page.query_selector_all('[aria-label="More times"]')
+                more_btn = more_btns[-1] if more_btns else None
+                if more_btn:
+                    cutoff_date = date.today() + timedelta(days=14)
+                    cutoff_pattern = (
+                        cutoff_date.strftime("%B") + r"\s+" + str(cutoff_date.day) + r"(?:st|nd|rd|th)"
+                    )
+                    # Replace full page text with compact book labels for initial state
+                    all_text = _acuity_book_labels(page)
+                    clicks = 0
+                    while more_btn and clicks < 10:
+                        more_btn.click(force=True)
+                        page.wait_for_timeout(800)
+                        clicks += 1
+                        batch = _acuity_book_labels(page)
+                        all_text += "\n" + batch
+                        if re.search(cutoff_pattern, batch):
+                            break
+                        more_btns = page.query_selector_all('[aria-label="More times"]')
+                        more_btn = more_btns[-1] if more_btns else None
+                    days_collected = 14
+                    print(f"  → clicked More times x{clicks}")
+                    break
+
                 # advance to next week / next page
                 next_btn = page.query_selector('[aria-label="Next"]')
                 if not next_btn:
@@ -401,8 +443,35 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
             page.close()
             browser.close()
 
+_CHUNK_LIMIT = 12000
+
 def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
-    """Call Claude Haiku and normalize fields. Location metadata is kept as-is (not resolved to IDs)."""
+    """Call Claude Haiku and normalize fields. Chunks large inputs to stay within output token limit."""
+    if len(page_text) > _CHUNK_LIMIT:
+        # Split at line boundaries into ~_CHUNK_LIMIT chunks, deduplicate by (date, time, name)
+        seen: set[tuple] = set()
+        result: list[dict] = []
+        pos = 0
+        while pos < len(page_text):
+            end = min(pos + _CHUNK_LIMIT, len(page_text))
+            if end < len(page_text):
+                nl = page_text.rfind("\n", pos, end)
+                if nl > pos:
+                    end = nl
+            chunk = page_text[pos:end].strip()
+            pos = end + 1
+            if not chunk:
+                continue
+            try:
+                for c in _parse_raw(chunk, studio_id, studio_name):
+                    key = (c.get("date"), c.get("start_time"), c.get("name", "")[:30])
+                    if key not in seen:
+                        seen.add(key)
+                        result.append(c)
+            except Exception as e:
+                print(f"  chunk parse error: {e}")
+        return result
+
     today = date.today().isoformat()
     year = date.today().year
     message = _anthropic.messages.create(
@@ -410,7 +479,7 @@ def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
         max_tokens=8192,
         messages=[{
             "role": "user",
-            "content": PROMPT.format(today=today, year=year) + "\n\n" + page_text[:12000]
+            "content": PROMPT.format(today=today, year=year) + "\n\n" + page_text
         }]
     )
     raw = message.content[0].text.strip()
@@ -447,9 +516,16 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict]]:
         urls = studio.get("schedule_urls") or []
         all_text = ""
         for url in urls:
-            t = fetch_page_text(url, days_ahead=studio.get("days_ahead") or 1)
+            t = fetch_page_text(url, days_ahead=14)
             print(f"[{tag}] {name}: {url} ({len(t)} chars)")
-            all_text += "\n\n" + t
+            # Inject city hint from URL path so Claude Haiku assigns correct location_city
+            from urllib.parse import urlparse as _urlparse
+            path_seg = _urlparse(url).path.lower().strip("/").split("/")[-1]
+            if "calendar-" in path_seg:
+                city_hint = path_seg.replace("calendar-", "").replace("-", " ").title()
+                all_text += f"\n\n[Location: {city_hint}, CA]\n" + t
+            else:
+                all_text += "\n\n" + t
         all_text = all_text.strip()
         if not all_text:
             print(f"[{tag}] {name}: no text, skipping")

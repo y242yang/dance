@@ -34,7 +34,7 @@
 		4181904E88699FDE1CD6AE67 /* SavedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedView.swift; sourceTree = "<group>"; };
 		5E3DFE42EB18E6A030B6B594 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		78398E8CB98F30755AEF78D1 /* SupabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClient.swift; sourceTree = "<group>"; };
-		7D07CC2AB5EE6D43C88603C6 /* Dance.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Dance.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7D07CC2AB5EE6D43C88603C6 /* Dance.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Dance.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8CAB7C33C8C56ADA347F620E /* StudioListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioListView.swift; sourceTree = "<group>"; };
 		8E26DCEE6ED2A624B9F126D8 /* LocationClassView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationClassView.swift; sourceTree = "<group>"; };
 		91171AA015DE9B3ECB4DED12 /* DanceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DanceViewModel.swift; sourceTree = "<group>"; };
@@ -131,6 +131,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
+					429ABEC42A24932EE5E9820C = {
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = CCBC7B77730AD964EB2C0D0B /* Build configuration list for PBXProject "Dance" */;
@@ -254,6 +257,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = Y2HHD36TDG;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Dance/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -337,6 +342,8 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = Y2HHD36TDG;
 				ENABLE_PREVIEWS = YES;
 				INFOPLIST_FILE = Dance/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
