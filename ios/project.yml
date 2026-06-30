@@ -19,7 +19,14 @@ targets:
       properties:
         UILaunchScreen:
           UIColorName: ""
-        CFBundleDisplayName: Dance
+        CFBundleDisplayName: Studio Hop
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.annyang.dance
