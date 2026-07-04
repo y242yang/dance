@@ -25,6 +25,7 @@ targets:
         CFBundleVersion: "2"
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+        NSCalendarsFullAccessUsageDescription: "Studio Hop needs calendar access to add dance classes to your calendar."
         UISupportedInterfaceOrientations~ipad:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationPortraitUpsideDown

@@ -22,6 +22,8 @@
 	<string>2</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>Studio Hop needs calendar access to add dance classes to your calendar.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

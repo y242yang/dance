@@ -97,6 +97,7 @@ extension String {
         case "beginner": return "Beginner"
         case "intermediate": return "Intermediate"
         case "advanced": return "Advanced"
+        case "master": return "Master"
         case "begin/int": return "Beg / Int"
         case "int/adv": return "Int / Adv"
         case "all_levels": return "All Levels"
@@ -111,6 +112,7 @@ extension String {
         case "intermediate": return .orange
         case "int/adv": return Color(red: 0.90, green: 0.40, blue: 0.15)
         case "advanced": return .red
+        case "master": return Color(red: 0.55, green: 0.10, blue: 0.85)
         case "all_levels": return .blue
         default: return .gray
         }

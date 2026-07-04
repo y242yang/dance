@@ -24,7 +24,7 @@ final class DanceViewModel {
     }
 
     var availableLevels: [String] {
-        let order = ["beginner", "begin/int", "intermediate", "int/adv", "advanced", "all_levels"]
+        let order = ["beginner", "begin/int", "intermediate", "int/adv", "advanced", "master", "all_levels"]
         let found = Set(classes.compactMap(\.level).filter { !$0.isEmpty })
         return order.filter { found.contains($0) }
     }

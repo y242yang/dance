@@ -17,7 +17,7 @@ _LEVEL_MAP = {
     "all levels": "all_levels",
     "all": "all_levels",
 }
-_VALID_LEVELS = {"beginner", "intermediate", "advanced", "begin/int", "int/adv", "all_levels"}
+_VALID_LEVELS = {"beginner", "intermediate", "advanced", "begin/int", "int/adv", "all_levels", "master"}
 
 _STYLE_MAP = {
     "hip-hop": "Hip Hop",
