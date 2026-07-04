@@ -302,7 +302,115 @@ def _scrape_linktree_calendly(url: str) -> str:
             browser.close()
 
 
+_EDS_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpbGVwY3d5a3Nwc2dibGxwdGJmIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NTQzNzYxNzgsImV4cCI6MTk2OTk1MjE3OH0.WCOgcOIzxgmlFFbs5Fc5AiyJb-bZyyl9m11R7gvBoxI"
+_EDS_GQL_URL = "https://tilepcwykspsgbllptbf.supabase.co/graphql/v1"
+_EDS_GQL_QUERY = """
+query GetClasses($start: Datetime, $end: Datetime) {
+  eventCollection(
+    filter: {startAt: {gte: $start, lte: $end}, canceledAt: {is: NULL}}
+    orderBy: {startAt: AscNullsLast}
+    first: 200
+  ) {
+    edges {
+      node {
+        id
+        autoFinalTitle
+        autoFinalSubtitle
+        startAt
+        autoEndAt
+        durationMinute
+        autoFinalTimezone
+        eventMemberCollection(filter: {role: {eq: "teacher"}}) {
+          edges {
+            node {
+              profile {
+                funcGivenNameEnFirst
+                funcFamilyNameEnFirst
+              }
+            }
+          }
+        }
+        space {
+          landmark { funcTitleShortEnFirst }
+        }
+      }
+    }
+  }
+}
+"""
+
+def _fetch_eds_classes(studio_id: str, days_ahead: int = 14) -> list[dict]:
+    """Fetch EDS classes directly from their Supabase GraphQL API, bypassing Haiku."""
+    from datetime import datetime, timedelta as _td
+    today = date.today()
+    cutoff = today + timedelta(days=days_ahead)
+    resp = http_requests.post(
+        _EDS_GQL_URL,
+        json={
+            "query": _EDS_GQL_QUERY,
+            "variables": {
+                "start": today.isoformat() + "T07:00:00+00:00",  # midnight PT (PDT = UTC-7)
+                "end": cutoff.isoformat() + "T06:59:59+00:00",   # 11:59 PM PT
+            },
+        },
+        headers={"apikey": _EDS_ANON_KEY, "Content-Type": "application/json"},
+        timeout=15,
+    )
+    payload = resp.json()
+    edges = ((payload.get("data") or {}).get("eventCollection") or {}).get("edges") or []
+    classes = []
+    for e in edges:
+        n = e["node"]
+        title_raw = n.get("autoFinalTitle") or ""
+        try:
+            title_en = json.loads(title_raw).get("en", title_raw)
+        except Exception:
+            title_en = title_raw
+        class_match = re.search(r"'([^']+)'", title_en)
+        class_name = class_match.group(1) if class_match else title_en
+        class_name = re.split(r"\s*/\s*#\d+", class_name)[0].strip()
+        teacher_match = re.match(r"\[0\]\s+(.+?)\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)", title_en)
+        teacher = teacher_match.group(1).strip() if teacher_match else ""
+        city_match = re.search(r"'\s+(\w[\w\s]*?)\s+\d+/\d+\s*$", title_en)
+        city = city_match.group(1).strip() if city_match else ""
+        subtitle_raw = n.get("autoFinalSubtitle") or ""
+        try:
+            subtitle = json.loads(subtitle_raw).get("en", subtitle_raw)
+            subtitle = re.sub(r"\s+\d+/\d+$", "", subtitle).strip()
+        except Exception:
+            subtitle = ""
+        title = subtitle or class_name
+        start_utc = n.get("startAt") or ""
+        duration_raw = n.get("durationMinute")
+        try:
+            dt_utc = datetime.fromisoformat(start_utc.replace("Z", "+00:00"))
+            pt_offset = -7 if 3 <= dt_utc.month <= 11 else -8
+            dt_pt = dt_utc + _td(hours=pt_offset)
+            date_str = dt_pt.strftime("%Y-%m-%d")
+            time_str = dt_pt.strftime("%H:%M:%S")
+        except Exception:
+            continue
+        c = {
+            "studio_id": studio_id,
+            "title": title,
+            "instructor": teacher or None,
+            "date": date_str,
+            "start_time": time_str,
+            "duration_minutes": _normalize_duration(duration_raw),
+            "dance_style": _normalize_style(None, title, ""),
+            "level": _normalize_level(None, title, ""),
+            "description": None,
+            "_loc_city": city or None,
+            "_loc_address": None,
+        }
+        classes.append(c)
+    return classes
+
+
 def fetch_page_text(url: str, days_ahead: int = 1) -> str:
+    if "my.eds.dance" in url:
+        return ""  # EDS handled directly in _fetch_studio via _fetch_eds_classes
+
     # Acuity .as.me URLs use a multi-step category click-through
     if ".as.me" in url:
         return _scrape_acuity_categories(url)
@@ -443,7 +551,7 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
             page.close()
             browser.close()
 
-_CHUNK_LIMIT = 12000
+_CHUNK_LIMIT = 5000
 
 def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
     """Call Claude Haiku and normalize fields. Chunks large inputs to stay within output token limit."""
@@ -514,6 +622,13 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict]]:
     exclude = [kw.lower() for kw in (db_exclude or code_exclude)]
     try:
         urls = studio.get("schedule_urls") or []
+
+        # EDS: skip Haiku — parse GraphQL API directly to avoid token-limit failures
+        if any("my.eds.dance" in u for u in urls):
+            classes = _fetch_eds_classes(sid, days_ahead=14)
+            print(f"[{tag}] {name}: {len(classes)} classes parsed (direct API)")
+            return sid, classes
+
         all_text = ""
         for url in urls:
             t = fetch_page_text(url, days_ahead=14)
