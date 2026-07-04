@@ -307,7 +307,7 @@ _EDS_GQL_URL = "https://tilepcwykspsgbllptbf.supabase.co/graphql/v1"
 _EDS_GQL_QUERY = """
 query GetClasses($start: Datetime, $end: Datetime) {
   eventCollection(
-    filter: {startAt: {gte: $start, lte: $end}, canceledAt: {is: NULL}}
+    filter: {startAt: {gte: $start, lte: $end}, canceledAt: {is: NULL}, kind: {eq: "dance_class"}}
     orderBy: {startAt: AscNullsLast}
     first: 200
   ) {
@@ -354,7 +354,7 @@ def _fetch_eds_classes(studio_id: str, days_ahead: int = 14) -> list[dict]:
             },
         },
         headers={"apikey": _EDS_ANON_KEY, "Content-Type": "application/json"},
-        timeout=15,
+        timeout=30,
     )
     payload = resp.json()
     edges = ((payload.get("data") or {}).get("eventCollection") or {}).get("edges") or []
