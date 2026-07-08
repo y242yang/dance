@@ -1,8 +1,6 @@
 import SwiftUI
 
 struct LearnMoreView: View {
-    @State private var studios: [String] = []
-
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
@@ -29,51 +27,6 @@ struct LearnMoreView: View {
                         detail: "Multi-class workshops and courses are not listed here. Check each studio's website directly for their workshop offerings."
                     )
 
-                    // Studios card
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack(alignment: .top, spacing: 14) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color.orange.opacity(0.18))
-                                    .frame(width: 44, height: 44)
-                                Image(systemName: "building.2.fill")
-                                    .font(.system(size: 18))
-                                    .foregroundStyle(.orange)
-                            }
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Tracked studios")
-                                    .font(.headline)
-                                    .foregroundStyle(.white)
-                                Text("We currently pull schedules from these Bay Area studios:")
-                                    .font(.subheadline)
-                                    .foregroundStyle(Color(white: 0.55))
-                                    .fixedSize(horizontal: false, vertical: true)
-                            }
-                        }
-
-                        VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(studios.enumerated()), id: \.offset) { idx, studio in
-                                HStack(spacing: 10) {
-                                    Circle()
-                                        .fill(Color(white: 0.35))
-                                        .frame(width: 5, height: 5)
-                                    Text(studio)
-                                        .font(.subheadline)
-                                        .foregroundStyle(Color(white: 0.80))
-                                    Spacer()
-                                }
-                                .padding(.vertical, 7)
-                                if idx < studios.count - 1 {
-                                    Divider().overlay(Color(white: 0.18))
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 4)
-                    }
-                    .padding(18)
-                    .background(Color(white: 0.10))
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-
                     RequestStudioCard()
 
                     Spacer().frame(height: 16)
@@ -85,19 +38,6 @@ struct LearnMoreView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(Color.black, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
-        .task {
-            guard studios.isEmpty else { return }
-            if let result = try? await supabase
-                .from("studios")
-                .select("name")
-                .order("name", ascending: true)
-                .execute()
-                .value as [Studio]
-            {
-                var seen = Set<String>()
-                studios = result.map(\.name).filter { seen.insert($0).inserted }
-            }
-        }
     }
 }
 

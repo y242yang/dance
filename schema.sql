@@ -20,7 +20,7 @@ CREATE TABLE classes (
   title TEXT NOT NULL,
   dance_style TEXT,
   instructor TEXT,
-  level TEXT CHECK (level IN ('beginner', 'intermediate', 'advanced', 'all_levels', 'open')),
+  level TEXT CHECK (level IN ('beginner', 'intermediate', 'advanced', 'begin/int', 'int/adv', 'all_levels', 'master')),
   date DATE NOT NULL,
   start_time TIME NOT NULL,
   duration_minutes INTEGER,

@@ -37,9 +37,17 @@ def get_default_location(studio_id: str) -> Optional[str]:
     return result[0]["id"] if result else None
 
 def replace_future_classes(studio_id: str, classes: list[dict]):
+    """Upsert by (deterministic) id so unchanged classes keep the same id across
+    scrapes — clients that reference a class by id (e.g. saved/hearted classes)
+    aren't invalidated every time this runs. Classes no longer present (canceled
+    or removed) are deleted."""
     db = get_client()
     from datetime import date
     today = date.today().isoformat()
-    db.table("classes").delete().eq("studio_id", studio_id).gte("date", today).execute()
+    new_ids = [c["id"] for c in classes]
+    q = db.table("classes").delete().eq("studio_id", studio_id).gte("date", today)
+    if new_ids:
+        q = q.not_.in_("id", new_ids)
+    q.execute()
     if classes:
-        db.table("classes").insert(classes).execute()
+        db.table("classes").upsert(classes, on_conflict="id").execute()

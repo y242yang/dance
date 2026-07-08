@@ -1,5 +1,7 @@
 import json
 import re
+import uuid
+import multiprocessing as mp
 import requests as http_requests
 import anthropic
 from datetime import date, timedelta
@@ -7,6 +9,15 @@ from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from playwright.sync_api import sync_playwright
 from db import get_or_create_location, replace_future_classes, get_default_location
+
+# Fixed namespace so the same (studio, title, date, start_time) always hashes to the
+# same class id across scrapes — lets clients (e.g. "saved"/hearted classes) reference
+# a class by id without it being invalidated by the next day's re-scrape.
+_CLASS_ID_NAMESPACE = uuid.UUID("7d6f5b0a-6b7e-4b8a-9b0a-6b7e4b8a9b0a")
+
+def _stable_class_id(studio_id: str, c: dict) -> str:
+    key = f"{studio_id}|{(c.get('title') or '').strip().lower()}|{c.get('date')}|{c.get('start_time')}"
+    return str(uuid.uuid5(_CLASS_ID_NAMESPACE, key))
 
 _default_location_cache = {}  # studio_id -> Optional[str]
 
@@ -31,11 +42,14 @@ _STYLE_MAP = {
     "k-Pop": "K-pop",
     "house dance": "House",
     "pro dance": "Pro Dance",
+    "chair": "Heels",  # "Chair" isn't its own style — chair-themed classes are Heels
+    "floorwork": "Heels",  # same — floorwork classes are Heels
 }
 _VALID_STYLES = {
     "Hip Hop", "Heels", "Jazz Funk", "K-pop", "Contemporary", "Ballet",
-    "Salsa", "Reggaeton", "Breaking", "House", "Vogue", "Turfing",
-    "Floorwork", "Chair", "Jazz", "Chinese", "Chinese Fusion", "Pro Dance", "Choreography",
+    "Salsa", "Reggaeton", "Dancehall", "Breaking", "House", "Vogue", "Turfing",
+    "Jazz", "Chinese", "Chinese Fusion", "Pro Dance", "Choreography",
+    "Locking", "Latin",
 }
 
 def _normalize_level(raw, title: str = "", description: str = "") -> str:
@@ -45,21 +59,29 @@ def _normalize_level(raw, title: str = "", description: str = "") -> str:
         return "all_levels"
     s = str(raw or "").strip().lower()
     if s in _LEVEL_MAP:
-        return _LEVEL_MAP[s]
+        raw_mapped = _LEVEL_MAP[s]
+    elif s in _VALID_LEVELS:
+        raw_mapped = s
+    else:
+        raw_mapped = None
+    # "all_levels" is both a real value and our generic fallback — if that's all raw
+    # gave us, still check title/description for a more specific level before settling.
+    if raw_mapped and raw_mapped != "all_levels":
+        return raw_mapped
     # Combo levels first (order matters — check before single levels)
     if ("int" in combined or "inter" in combined) and "adv" in combined:
         return "int/adv"
     if "beg" in combined and ("int" in combined or "inter" in combined):
         return "begin/int"
-    if s in _VALID_LEVELS:
-        return s
+    if "master" in combined:
+        return "master"
     if "beg" in combined:
         return "beginner"
     if "adv" in combined:
         return "advanced"
     if "inter" in combined or s == "int":
         return "intermediate"
-    return "all_levels"
+    return raw_mapped or "all_levels"
 
 def _normalize_duration(raw) -> "int | None":
     if raw is None:
@@ -71,27 +93,38 @@ def _normalize_duration(raw) -> "int | None":
         return None
 
 def _normalize_style(raw, title: str = "", description: str = "") -> str:
+    combined = " ".join(filter(None, [title, description])).lower()
+    # Heels classes are frequently themed around another genre or prop (e.g. "Reggaeton
+    # Heels", "Chair Heels") — Heels is the actual technique/style being taught, so it
+    # wins over whatever raw value (or theme) the source page or Haiku assigned.
+    if "heels" in combined:
+        return "Heels"
     s = str(raw or "").strip()
     lower = s.lower()
     if lower in _STYLE_MAP:
-        return _STYLE_MAP[lower]
-    if s in _VALID_STYLES:
-        return s
-    # Derive from title + description if raw didn't match
-    combined = " ".join(filter(None, [title, description])).lower()
+        raw_mapped = _STYLE_MAP[lower]
+    elif s in _VALID_STYLES:
+        raw_mapped = s
+    else:
+        raw_mapped = None
+    # "Choreography" is both a real value and our generic fallback — if that's all raw
+    # gave us, still check title/description for a more specific style before settling.
+    if raw_mapped and raw_mapped != "Choreography":
+        return raw_mapped
     for keyword, label in [
         ("hip hop", "Hip Hop"), ("hiphop", "Hip Hop"), ("hip-hop", "Hip Hop"),
         ("jazz funk", "Jazz Funk"), ("jazzfunk", "Jazz Funk"),
         ("k-pop", "K-pop"), ("kpop", "K-pop"), ("k pop", "K-pop"),
-        ("heels", "Heels"), ("reggaeton", "Reggaeton"), ("salsa", "Salsa"),
+        ("heels", "Heels"), ("reggaeton", "Reggaeton"), ("dancehall", "Dancehall"), ("salsa", "Salsa"),
         ("ballet", "Ballet"), ("contemporary", "Contemporary"),
         ("breaking", "Breaking"), ("house", "House"), ("vogue", "Vogue"),
-        ("turfing", "Turfing"), ("floorwork", "Floorwork"), ("chair", "Chair"),
+        ("turfing", "Turfing"), ("floorwork", "Heels"), ("chair", "Heels"),
         ("jazz", "Jazz"), ("chinese", "Chinese"), ("pro dance", "Pro Dance"),
+        ("locking", "Locking"), ("latin", "Latin"),
     ]:
         if keyword in combined:
             return label
-    return "Choreography"
+    return raw_mapped or "Choreography"
 
 # Fallback keyword exclusions when exclude_keywords column is absent from DB
 STUDIO_EXCLUDES = {
@@ -105,7 +138,7 @@ PROMPT = """You are extracting dance class schedule data from a studio website.
 
 Extract every class listed and return a JSON array. Each class object must have:
 - title: class name (string)
-- dance_style: use these exact labels only — "Hip Hop", "Heels", "Jazz Funk", "K-pop", "Contemporary", "Ballet", "Salsa", "Reggaeton", "Breaking", "House", "Vogue", "Turfing", "Floorwork", "Chair", "Jazz", "Chinese", "Chinese Fusion", "Pro Dance", "Choreography". Pick the closest match. Use "Choreography" as the fallback if none fit. (string or null)
+- dance_style: use these exact labels only — "Hip Hop", "Heels", "Jazz Funk", "K-pop", "Contemporary", "Ballet", "Salsa", "Reggaeton", "Dancehall", "Breaking", "House", "Vogue", "Turfing", "Jazz", "Chinese", "Chinese Fusion", "Pro Dance", "Locking", "Latin", "Choreography". Pick the closest match — Dancehall and Reggaeton are different genres, don't conflate them. Chair- and floorwork-themed classes should be labeled "Heels", not a separate style. Use "Choreography" as the fallback if none fit. (string or null)
 - instructor: teacher name (string or null)
 - level: one of "beginner", "intermediate", "advanced", "begin/int", "int/adv", "all_levels" (string). Rules:
     * Check the level field first, then look for clues in the class title and description.
@@ -116,6 +149,7 @@ Extract every class listed and return a JSON array. Each class object must have:
 - date: in YYYY-MM-DD format (string). Rules:
     * If a full date like "Sunday, June 28th, 2026" is given, use it directly.
     * If month+day are given (e.g. "Jul 21"), use year {year}.
+    * If a relative label like "TODAY", "TOMORROW", or "THIS THURSDAY, JULY 9" is given, resolve it relative to today ({today}) — use the explicit month+day if present, otherwise compute the offset from today.
     * If only a weekday is given, resolve to the next upcoming occurrence from today ({today}).
     * For listings that show multiple dates followed by multiple times in order (e.g. "Jul 21 / Jul 28 / 8:00 PM / 8:00 PM"), pair them positionally.
 - start_time: in HH:MM:SS format, 24-hour (string)
@@ -271,31 +305,82 @@ def _fetch_wix_slots(base_url: str, auth_token: str, from_date: date, to_date: d
 
 
 def _scrape_linktree_calendly(url: str) -> str:
-    """Load a Linktree page, follow each Calendly booking link, and collect class text."""
+    """Load a Linktree page, follow each Calendly/Momence booking link, and collect class text."""
     with sync_playwright() as p:
         browser = p.chromium.launch()
         page = browser.new_page()
         try:
             page.goto(url, wait_until="load", timeout=20000)
             page.wait_for_timeout(3000)
-            # Collect all calendly.com links
-            links = page.query_selector_all('a[href*="calendly.com"]')
-            calendly_urls = []
+            # Collect all calendly.com and momence.com booking links
+            links = page.query_selector_all('a[href*="calendly.com"], a[href*="momence.com"]')
+            booking_urls = []
             for link in links:
                 href = link.get_attribute("href") or ""
-                if "calendly.com" in href and href not in calendly_urls:
-                    calendly_urls.append(href)
-            print(f"  → found {len(calendly_urls)} Calendly links")
+                if ("calendly.com" in href or "momence.com" in href) and href not in booking_urls:
+                    booking_urls.append(href)
+            print(f"  → found {len(booking_urls)} Calendly/Momence links")
             all_text = ""
-            for cal_url in calendly_urls:
+            for booking_url in booking_urls:
                 try:
-                    page.goto(cal_url, wait_until="networkidle", timeout=20000)
-                    cal_text = page.inner_text("body")
-                    print(f"  → calendly {len(cal_text)} chars: {cal_text[:80].strip()!r}")
-                    if "not valid" not in cal_text.lower():
-                        all_text += "\n\n" + cal_text
+                    page.goto(booking_url, wait_until="networkidle", timeout=20000)
+                    class_text = page.inner_text("body")
+                    print(f"  → booking {len(class_text)} chars: {class_text[:80].strip()!r}")
+                    lower = class_text.lower()
+                    if "not valid" not in lower and "already passed" not in lower:
+                        all_text += "\n\n" + class_text
                 except Exception as e:
-                    print(f"  → calendly error: {e}")
+                    print(f"  → booking error: {e}")
+            return all_text
+        finally:
+            page.close()
+            browser.close()
+
+
+def _scrape_rae_studios(url: str, days_ahead: int = 14) -> str:
+    """Rae Studios embeds a paginated Momence booking widget inside a Wix HTML iframe.
+    Click "SHOW All" then page through it, collecting real class listings (date, time,
+    room, style+level, instructor) until we pass the days_ahead cutoff."""
+    cutoff_date = date.today() + timedelta(days=days_ahead)
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page(viewport={"width": 1280, "height": 3000})
+        try:
+            page.goto(url, wait_until="load", timeout=30000)
+            page.wait_for_timeout(4000)
+            target = None
+            for f in page.frames:
+                if f.url.startswith("https://www-raestudios-sf-com.filesusr.com/html/"):
+                    try:
+                        if f.query_selector('text=SHOW All'):
+                            target = f
+                            break
+                    except Exception:
+                        pass
+            if not target:
+                print("  → Rae Studios widget iframe not found")
+                return ""
+
+            show_all = target.query_selector('text=SHOW All')
+            if show_all:
+                show_all.evaluate("el => el.click()")
+                page.wait_for_timeout(2500)
+
+            all_text = ""
+            cutoff_patterns = [
+                cutoff_date.strftime("%B").upper() + " " + str(cutoff_date.day),
+            ]
+            for page_num in range(1, 11):
+                chunk = target.inner_text("body")
+                all_text += "\n\n" + chunk
+                print(f"  → page {page_num}: {len(chunk)} chars")
+                if any(pat in chunk.upper() for pat in cutoff_patterns):
+                    break
+                next_btn = target.query_selector('[aria-label^="Next Page"]')
+                if not next_btn:
+                    break
+                next_btn.evaluate("el => el.click()")
+                page.wait_for_timeout(2000)
             return all_text
         finally:
             page.close()
@@ -330,8 +415,11 @@ query GetClasses($start: Datetime, $end: Datetime) {
             }
           }
         }
-        space {
-          landmark { funcTitleShortEnFirst }
+        autoSpaceLandmark {
+          funcTitleShortEnFirst
+        }
+        metadata {
+          autoFinalTitle
         }
       }
     }
@@ -371,8 +459,11 @@ def _fetch_eds_classes(studio_id: str, days_ahead: int = 14) -> list[dict]:
         class_name = re.split(r"\s*/\s*#\d+", class_name)[0].strip()
         teacher_match = re.match(r"\[0\]\s+(.+?)\s+(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)", title_en)
         teacher = teacher_match.group(1).strip() if teacher_match else ""
-        city_match = re.search(r"'\s+(\w[\w\s]*?)\s+\d+/\d+\s*$", title_en)
-        city = city_match.group(1).strip() if city_match else ""
+        # Use the authoritative location relation rather than guessing the city from raw
+        # text — e.g. "EDS Fremont" / "Cupertino Studio C" both need to resolve to the
+        # same location names ("Fremont" / "Cupertino") already used in the DB.
+        landmark_raw = ((n.get("autoSpaceLandmark") or {}).get("funcTitleShortEnFirst")) or ""
+        city = next((c for c in ("Fremont", "Cupertino") if c.lower() in landmark_raw.lower()), None)
         subtitle_raw = n.get("autoFinalSubtitle") or ""
         try:
             subtitle = json.loads(subtitle_raw).get("en", subtitle_raw)
@@ -380,6 +471,14 @@ def _fetch_eds_classes(studio_id: str, days_ahead: int = 14) -> list[dict]:
         except Exception:
             subtitle = ""
         title = subtitle or class_name
+        # The event's own title/subtitle is often a creative/song-based session name
+        # (e.g. "One Last Time") with no style info in it at all — the actual style+level
+        # ("Beginner High Heels") lives on the linked class-series metadata instead.
+        category_raw = ((n.get("metadata") or {}).get("autoFinalTitle")) or ""
+        try:
+            category = json.loads(category_raw).get("en", category_raw)
+        except Exception:
+            category = category_raw
         start_utc = n.get("startAt") or ""
         duration_raw = n.get("durationMinute")
         try:
@@ -397,10 +496,13 @@ def _fetch_eds_classes(studio_id: str, days_ahead: int = 14) -> list[dict]:
             "date": date_str,
             "start_time": time_str,
             "duration_minutes": _normalize_duration(duration_raw),
-            "dance_style": _normalize_style(None, title, ""),
-            "level": _normalize_level(None, title, ""),
-            "description": None,
-            "_loc_city": city or None,
+            # Only the category (the class series' actual style/level) counts as a
+            # signal — the session's own title is often just a creative/song name
+            # (e.g. "One Last Time") and shouldn't influence style or level at all.
+            "dance_style": _normalize_style(None, "", category),
+            "level": _normalize_level(None, "", category),
+            "description": category or None,
+            "_loc_city": city,
             "_loc_address": None,
         }
         classes.append(c)
@@ -418,6 +520,10 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
     # Linktree pages: follow Calendly booking links
     if "linktr.ee" in url:
         return _scrape_linktree_calendly(url)
+
+    # Rae Studios embeds a paginated Momence widget in a Wix iframe
+    if "raestudios-sf.com" in url:
+        return _scrape_rae_studios(url, days_ahead=days_ahead)
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -556,23 +662,26 @@ _CHUNK_LIMIT = 5000
 def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
     """Call Claude Haiku and normalize fields. Chunks large inputs to stay within output token limit."""
     if len(page_text) > _CHUNK_LIMIT:
-        # Split at line boundaries into ~_CHUNK_LIMIT chunks, deduplicate by (date, time, name)
+        # Split at blank-line (paragraph) boundaries so a single class's text block
+        # is never cut in half — falls back to a line boundary if no blank line is in range.
         seen: set[tuple] = set()
         result: list[dict] = []
         pos = 0
         while pos < len(page_text):
             end = min(pos + _CHUNK_LIMIT, len(page_text))
             if end < len(page_text):
-                nl = page_text.rfind("\n", pos, end)
-                if nl > pos:
-                    end = nl
+                boundary = page_text.rfind("\n\n", pos, end)
+                if boundary <= pos:
+                    boundary = page_text.rfind("\n", pos, end)
+                if boundary > pos:
+                    end = boundary
             chunk = page_text[pos:end].strip()
             pos = end + 1
             if not chunk:
                 continue
             try:
                 for c in _parse_raw(chunk, studio_id, studio_name):
-                    key = (c.get("date"), c.get("start_time"), c.get("name", "")[:30])
+                    key = (c.get("date"), c.get("start_time"), c.get("title", "")[:30])
                     if key not in seen:
                         seen.add(key)
                         result.append(c)
@@ -626,6 +735,11 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict]]:
         # EDS: skip Haiku — parse GraphQL API directly to avoid token-limit failures
         if any("my.eds.dance" in u for u in urls):
             classes = _fetch_eds_classes(sid, days_ahead=14)
+            if exclude:
+                classes = [c for c in classes if not any(
+                    kw in ((c.get("title") or "") + " " + (c.get("description") or "")).lower()
+                    for kw in exclude
+                )]
             print(f"[{tag}] {name}: {len(classes)} classes parsed (direct API)")
             return sid, classes
 
@@ -650,7 +764,10 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict]]:
         cutoff = (date.today() + timedelta(days=14)).isoformat()
         classes = [c for c in classes if today_str <= (c.get("date") or "") <= cutoff]
         if exclude:
-            classes = [c for c in classes if not any(kw in (c.get("title") or "").lower() for kw in exclude)]
+            classes = [c for c in classes if not any(
+                kw in ((c.get("title") or "") + " " + (c.get("description") or "")).lower()
+                for kw in exclude
+            )]
         print(f"[{tag}] {name}: {len(classes)} classes parsed")
         return sid, classes
     except Exception as e:
@@ -666,7 +783,12 @@ def _write_studio(studio: dict, classes: list[dict]):
     name = studio["name"]
     tag = sid[:8]
     resolved = []
-    for c in classes:
+    # Process classes with an explicit city first, so if this studio has no pre-existing
+    # location yet, get_or_create_location() creates one before any class falls back to
+    # get_default_location() — otherwise the fallback can cache a stale "no location"
+    # result from before the real one existed.
+    for c in sorted(classes, key=lambda c: c.get("_loc_city") is None):
+        c["id"] = _stable_class_id(sid, c)
         loc_city = c.pop("_loc_city", None)
         loc_address = c.pop("_loc_address", None)
         if loc_city:
@@ -680,17 +802,59 @@ def _write_studio(studio: dict, classes: list[dict]):
     print(f"[{tag}] {name}: {len(resolved)} classes saved")
 
 
-def scrape_all(studios: list[dict]):
-    # Phase 1: parallel fetch + parse (no DB calls)
-    results: dict[str, list[dict]] = {}
-    with ThreadPoolExecutor(max_workers=len(studios)) as executor:
-        future_to_studio = {executor.submit(_fetch_studio, s): s for s in studios}
-        for future in as_completed(future_to_studio):
-            sid, classes = future.result()
-            results[sid] = classes
+_STUDIO_TIMEOUT_SECONDS = 240
+_STUDIO_MAX_ATTEMPTS = 2
 
-    # Phase 2: sequential DB writes in original studio order
-    for studio in studios:
-        classes = results.get(studio["id"], [])
-        if classes:
-            _write_studio(studio, classes)
+
+def _fetch_studio_into_queue(studio: dict, q: "mp.Queue"):
+    q.put(_fetch_studio(studio))
+
+
+def _fetch_studio_with_timeout(studio: dict) -> tuple[str, list[dict]]:
+    """Run _fetch_studio in its own subprocess with a hard timeout and one retry.
+    A thread can't be forcibly killed if Playwright/network calls hang, so a stuck
+    fetch would otherwise block forever and leak a browser process. A subprocess can
+    be terminated outright, guaranteeing nothing dangles past this call."""
+    tag = studio["id"][:8]
+    ctx = mp.get_context("spawn")
+    for attempt in range(1, _STUDIO_MAX_ATTEMPTS + 1):
+        q = ctx.Queue()
+        p = ctx.Process(target=_fetch_studio_into_queue, args=(studio, q))
+        p.start()
+        p.join(_STUDIO_TIMEOUT_SECONDS)
+        if p.is_alive():
+            print(f"[{tag}] {studio['name']}: attempt {attempt} timed out after "
+                  f"{_STUDIO_TIMEOUT_SECONDS}s, killing worker process")
+            p.terminate()
+            p.join(5)
+            if p.is_alive():
+                p.kill()
+                p.join()
+        elif p.exitcode != 0:
+            print(f"[{tag}] {studio['name']}: attempt {attempt} worker crashed (exit code {p.exitcode})")
+        else:
+            try:
+                return q.get_nowait()
+            except Exception:
+                print(f"[{tag}] {studio['name']}: attempt {attempt} produced no result")
+        q.close()
+        q.join_thread()
+    print(f"[{tag}] {studio['name']}: all {_STUDIO_MAX_ATTEMPTS} attempts failed, leaving existing data untouched")
+    return studio["id"], []
+
+
+def scrape_all(studios: list[dict]):
+    # Fetch + parse all studios in parallel (each in its own timeout-guarded subprocess),
+    # writing each studio's result to the DB as soon as it's ready rather than waiting
+    # for the slowest one — one stuck studio no longer delays or blocks everyone else's data.
+    with ThreadPoolExecutor(max_workers=len(studios)) as executor:
+        future_to_studio = {executor.submit(_fetch_studio_with_timeout, s): s for s in studios}
+        for future in as_completed(future_to_studio):
+            studio = future_to_studio[future]
+            sid, classes = future.result()
+            if classes:
+                try:
+                    _write_studio(studio, classes)
+                except Exception as e:
+                    tag = studio["id"][:8]
+                    print(f"[{tag}] {studio['name']}: WRITE FAILED, skipping ({e})")

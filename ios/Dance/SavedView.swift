@@ -14,6 +14,13 @@ struct SavedView: View {
     @State private var showLogSheet = false
     @State private var selectedEntry: LogEntry?
 
+    // "My Class Log" is for classes you're committed to attending, not a history —
+    // once a logged class's date passes, it drops out of this list. The underlying
+    // entry isn't deleted, just no longer shown here.
+    private var upcomingLogEntries: [LogEntry] {
+        savedStore.logEntries.filter { $0.date >= Date() }
+    }
+
     var body: some View {
         ZStack {
             kBg.ignoresSafeArea()
@@ -22,9 +29,9 @@ struct SavedView: View {
                 ProgressView("Loading…")
                     .tint(Color(red: 0.62, green: 0.35, blue: 1.0))
                     .foregroundStyle(.white)
-            } else if savedStore.savedIds.isEmpty && savedStore.logEntries.isEmpty {
+            } else if savedStore.savedIds.isEmpty && upcomingLogEntries.isEmpty {
                 emptyState
-            } else if let err = error, classes.isEmpty && savedStore.logEntries.isEmpty {
+            } else if let err = error, classes.isEmpty && upcomingLogEntries.isEmpty {
                 DarkErrorView(message: err) { Task { await fetch() } }
             } else {
                 contentView
@@ -59,7 +66,7 @@ struct SavedView: View {
                 .foregroundStyle(Color(red: 0.62, green: 0.35, blue: 1.0))
             Text("No saved classes yet")
                 .font(.title3).fontWeight(.semibold).foregroundStyle(.white)
-            Text("Tap the heart on any class to save it here, or tap ✏️ to log a class you took.")
+            Text("Tap the heart on any class to save it here, or tap ✏️ to log a class you're confirmed to attend.")
                 .foregroundStyle(kSecondary).multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
         }
@@ -121,9 +128,9 @@ struct SavedView: View {
             }
 
             // Log section
-            if !savedStore.logEntries.isEmpty {
+            if !upcomingLogEntries.isEmpty {
                 Section(header: sectionHeader("My Class Log")) {
-                    ForEach(savedStore.logEntries) { entry in
+                    ForEach(upcomingLogEntries) { entry in
                         Button { selectedEntry = entry } label: {
                             LogEntryRow(entry: entry)
                         }
@@ -279,7 +286,7 @@ private struct LogEntrySheet: View {
                 Color.black.ignoresSafeArea()
                 Form {
                     Section {
-                        DatePicker("Date & Time", selection: $date, displayedComponents: [.date, .hourAndMinute])
+                        DatePicker("Date & Time", selection: $date, in: Date()..., displayedComponents: [.date, .hourAndMinute])
                         Stepper("Duration: \(duration) min", value: $duration, in: 15...240, step: 15)
                     }
                     Section("Class") {

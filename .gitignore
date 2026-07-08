@@ -26,6 +26,9 @@ build/
 # Playwright
 scraper/scrapers/__pycache__/
 
+# Scraper runtime log
+scraper/scraper.log
+
 # Xcode
 ios/Dance.xcodeproj/xcuserdata/
 ios/Dance.xcodeproj/project.xcworkspace/xcuserdata/

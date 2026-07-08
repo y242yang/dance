@@ -21,7 +21,7 @@ targets:
           UIColorName: ""
         CFBundleDisplayName: Studio Hop
         ITSAppUsesNonExemptEncryption: false
-        CFBundleShortVersionString: "1.0"
+        CFBundleShortVersionString: "1.1"
         CFBundleVersion: "2"
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
