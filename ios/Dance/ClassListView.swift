@@ -242,8 +242,7 @@ struct DarkChip: View {
     var body: some View {
         Button(action: action) {
             Text(label)
-                .font(.subheadline)
-                .fontWeight(isSelected ? .semibold : .regular)
+                .font(.subheadline.weight(.semibold))
                 .padding(.horizontal, 14)
                 .padding(.vertical, 7)
                 .background(isSelected ? color : Color(white: 0.14))

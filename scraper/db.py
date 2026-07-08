@@ -36,6 +36,14 @@ def get_default_location(studio_id: str) -> Optional[str]:
         .eq("studio_id", studio_id).limit(1).execute().data
     return result[0]["id"] if result else None
 
+def delete_past_classes():
+    """Remove classes whose date has already passed. Safe for clients: the app's
+    Saved view already filters to date >= today, and "My Class Log" is stored
+    locally on-device and doesn't reference this table."""
+    from datetime import date
+    today = date.today().isoformat()
+    get_client().table("classes").delete().lt("date", today).execute()
+
 def replace_future_classes(studio_id: str, classes: list[dict]):
     """Upsert by (deterministic) id so unchanged classes keep the same id across
     scrapes — clients that reference a class by id (e.g. saved/hearted classes)
