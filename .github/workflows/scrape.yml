@@ -15,7 +15,11 @@ concurrency:
 
 jobs:
   scrape:
-    runs-on: ubuntu-latest
+    # Pinned to 22.04: Playwright 1.44's `--with-deps` installs libasound2, which was
+    # renamed to libasound2t64 on ubuntu-24.04 ("noble", the current ubuntu-latest),
+    # breaking browser install. 22.04 still ships libasound2. Revisit if Playwright is
+    # upgraded to a noble-aware version (>=1.47).
+    runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
