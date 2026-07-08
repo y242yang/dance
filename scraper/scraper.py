@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import uuid
 import multiprocessing as mp
@@ -21,7 +22,20 @@ def _stable_class_id(studio_id: str, c: dict) -> str:
 
 _default_location_cache = {}  # studio_id -> Optional[str]
 
-_anthropic = anthropic.Anthropic()
+# Upper bound on pagination clicks/pages for the "click through weeks" scrapers. This is
+# only a runaway guard — the real stop condition is reaching the days-ahead cutoff date
+# (or running out of Next buttons). Set high enough that 14 days is never truncated.
+_PAGINATION_MAX_CLICKS = 25
+
+# Created lazily on first use so the module can be imported (e.g. by unit tests that
+# only exercise the pure normalizer functions) without an ANTHROPIC_API_KEY set.
+_anthropic = None
+
+def _get_anthropic():
+    global _anthropic
+    if _anthropic is None:
+        _anthropic = anthropic.Anthropic()
+    return _anthropic
 
 _LEVEL_MAP = {
     "open": "all_levels",
@@ -51,6 +65,8 @@ _VALID_STYLES = {
     "Jazz", "Chinese", "Chinese Fusion", "Pro Dance", "Choreography",
     "Locking", "Latin",
 }
+# Lowercased name -> canonical style, for case-insensitive passthrough matching.
+_VALID_STYLES_LOWER = {s.lower(): s for s in _VALID_STYLES}
 
 def _normalize_level(raw, title: str = "", description: str = "") -> str:
     # Combine level field + title + description for clue detection
@@ -83,6 +99,14 @@ def _normalize_level(raw, title: str = "", description: str = "") -> str:
         return "intermediate"
     return raw_mapped or "all_levels"
 
+def _max_class_date(classes: list) -> "str | None":
+    """The latest YYYY-MM-DD date among parsed classes, or None if there are none.
+    Used as the 'covered_through' watermark: we only trust (and prune) rows up to the
+    furthest date we actually scraped."""
+    dates = [c.get("date") for c in classes if c.get("date")]
+    return max(dates) if dates else None
+
+
 def _normalize_duration(raw) -> "int | None":
     if raw is None:
         return None
@@ -103,8 +127,10 @@ def _normalize_style(raw, title: str = "", description: str = "") -> str:
     lower = s.lower()
     if lower in _STYLE_MAP:
         raw_mapped = _STYLE_MAP[lower]
-    elif s in _VALID_STYLES:
-        raw_mapped = s
+    elif lower in _VALID_STYLES_LOWER:
+        # Match valid styles case-insensitively so a correctly-named style in the wrong
+        # case (e.g. "reggaeton") maps to its canonical form instead of falling through.
+        raw_mapped = _VALID_STYLES_LOWER[lower]
     else:
         raw_mapped = None
     # "Choreography" is both a real value and our generic fallback — if that's all raw
@@ -370,17 +396,26 @@ def _scrape_rae_studios(url: str, days_ahead: int = 14) -> str:
             cutoff_patterns = [
                 cutoff_date.strftime("%B").upper() + " " + str(cutoff_date.day),
             ]
-            for page_num in range(1, 11):
+            reached_cutoff = False
+            page_num = 0
+            # Cap is a runaway guard only; the real stop is the cutoff date or running
+            # out of "Next Page" buttons.
+            while page_num < _PAGINATION_MAX_CLICKS:
+                page_num += 1
                 chunk = target.inner_text("body")
                 all_text += "\n\n" + chunk
                 print(f"  → page {page_num}: {len(chunk)} chars")
                 if any(pat in chunk.upper() for pat in cutoff_patterns):
+                    reached_cutoff = True
                     break
                 next_btn = target.query_selector('[aria-label^="Next Page"]')
                 if not next_btn:
-                    break
+                    break  # genuine end of schedule
                 next_btn.evaluate("el => el.click()")
                 page.wait_for_timeout(2000)
+            if not reached_cutoff:
+                print(f"  → WARNING: Rae Studios stopped after {page_num} pages "
+                      f"without reaching {days_ahead}-day cutoff (may be partial)")
             return all_text
         finally:
             page.close()
@@ -622,18 +657,27 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
                     # Replace full page text with compact book labels for initial state
                     all_text = _acuity_book_labels(page)
                     clicks = 0
-                    while more_btn and clicks < 10:
+                    reached_cutoff = False
+                    # Cap is a runaway guard only — the real stop is reaching the cutoff
+                    # date. Set well above what 14 days needs so we don't truncate early
+                    # if a studio has many classes per "More times" batch.
+                    while more_btn and clicks < _PAGINATION_MAX_CLICKS:
                         more_btn.click(force=True)
                         page.wait_for_timeout(800)
                         clicks += 1
                         batch = _acuity_book_labels(page)
                         all_text += "\n" + batch
                         if re.search(cutoff_pattern, batch):
+                            reached_cutoff = True
                             break
                         more_btns = page.query_selector_all('[aria-label="More times"]')
                         more_btn = more_btns[-1] if more_btns else None
                     days_collected = 14
-                    print(f"  → clicked More times x{clicks}")
+                    if not reached_cutoff:
+                        print(f"  → WARNING: 'More times' stopped after {clicks} clicks "
+                              f"without reaching {days_ahead}-day cutoff (may be partial)")
+                    else:
+                        print(f"  → clicked More times x{clicks} (reached cutoff)")
                     break
 
                 # advance to next week / next page
@@ -691,7 +735,7 @@ def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
 
     today = date.today().isoformat()
     year = date.today().year
-    message = _anthropic.messages.create(
+    message = _get_anthropic().messages.create(
         model="claude-haiku-4-5-20251001",
         max_tokens=8192,
         messages=[{
@@ -704,7 +748,16 @@ def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
-    classes = json.loads(raw)
+    try:
+        classes = json.loads(raw)
+    except (json.JSONDecodeError, ValueError) as e:
+        # A malformed model response shouldn't sink the whole studio's parse — log and
+        # skip this (chunk of) input. Chunked callers still get every other chunk.
+        print(f"  Haiku returned non-JSON, skipping: {e}; raw[:120]={raw[:120]!r}")
+        return []
+    if not isinstance(classes, list):
+        print(f"  Haiku returned non-list JSON ({type(classes).__name__}), skipping")
+        return []
     result = []
     for c in classes:
         if not c.get("start_time"):
@@ -721,31 +774,69 @@ def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
     return result
 
 
-def _fetch_studio(studio: dict) -> tuple[str, list[dict]]:
-    """Phase 1 (parallel): fetch pages + parse + normalize. No DB calls."""
+_DAYS_AHEAD = 14
+
+def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
+    """Phase 1 (parallel): fetch pages + parse + normalize. No DB calls.
+
+    Returns (studio_id, classes, covered_through). `covered_through` is the furthest
+    date (YYYY-MM-DD) this scrape can vouch for, and drives how much the parent prunes:
+      * None            → the fetch/parse failed OR produced nothing trustworthy; the
+                          parent must leave ALL existing rows untouched.
+      * "YYYY-MM-DD"    → `classes` is authoritative for [today, that date]. The parent
+                          refreshes that range and leaves later-dated rows alone, so a
+                          run that only paginated part of the window never erases a
+                          previous, more-complete run's later weeks.
+
+    A studio genuinely having zero upcoming classes for two weeks is effectively
+    impossible, so an empty parse is treated as an untrustworthy fetch (None) rather
+    than a signal to clear the studio — erring toward never destroying good data.
+    """
     sid = studio["id"]
     name = studio["name"]
     tag = sid[:8]
+    today_str = date.today().isoformat()
+    cutoff = (date.today() + timedelta(days=_DAYS_AHEAD)).isoformat()
     db_exclude = studio.get("exclude_keywords") or []
     code_exclude = STUDIO_EXCLUDES.get(name, [])
     exclude = [kw.lower() for kw in (db_exclude or code_exclude)]
+
+    def _apply_exclude(classes):
+        if not exclude:
+            return classes
+        return [c for c in classes if not any(
+            kw in ((c.get("title") or "") + " " + (c.get("description") or "")).lower()
+            for kw in exclude
+        )]
+
+    def _report(classes, coverage):
+        # Turn coverage into a human-readable N/14 days line and a status word.
+        if coverage is None:
+            status = "FAILED (existing data kept)"
+            days = 0
+        else:
+            days = (date.fromisoformat(coverage) - date.today()).days + 1
+            if days >= _DAYS_AHEAD:
+                status = "complete"
+            else:
+                status = f"PARTIAL — reached {coverage}, short of {cutoff}"
+        print(f"[{tag}] {name}: {len(classes)} classes, coverage {max(days, 0)}/{_DAYS_AHEAD} days ({status})")
+
     try:
         urls = studio.get("schedule_urls") or []
 
-        # EDS: skip Haiku — parse GraphQL API directly to avoid token-limit failures
+        # EDS: skip Haiku — parse GraphQL API directly to avoid token-limit failures.
+        # The EDS API returns the whole [today, cutoff] window in one call, so a
+        # non-empty result is authoritative through the full cutoff.
         if any("my.eds.dance" in u for u in urls):
-            classes = _fetch_eds_classes(sid, days_ahead=14)
-            if exclude:
-                classes = [c for c in classes if not any(
-                    kw in ((c.get("title") or "") + " " + (c.get("description") or "")).lower()
-                    for kw in exclude
-                )]
-            print(f"[{tag}] {name}: {len(classes)} classes parsed (direct API)")
-            return sid, classes
+            classes = _apply_exclude(_fetch_eds_classes(sid, days_ahead=_DAYS_AHEAD))
+            coverage = cutoff if classes else None
+            _report(classes, coverage)
+            return sid, classes, coverage
 
         all_text = ""
         for url in urls:
-            t = fetch_page_text(url, days_ahead=14)
+            t = fetch_page_text(url, days_ahead=_DAYS_AHEAD)
             print(f"[{tag}] {name}: {url} ({len(t)} chars)")
             # Inject city hint from URL path so Claude Haiku assigns correct location_city
             from urllib.parse import urlparse as _urlparse
@@ -757,28 +848,30 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict]]:
                 all_text += "\n\n" + t
         all_text = all_text.strip()
         if not all_text:
-            print(f"[{tag}] {name}: no text, skipping")
-            return sid, []
+            # A working schedule page always has text; empty means the fetch failed.
+            _report([], None)
+            return sid, [], None
         classes = _parse_raw(all_text, sid, name)
-        today_str = date.today().isoformat()
-        cutoff = (date.today() + timedelta(days=14)).isoformat()
         classes = [c for c in classes if today_str <= (c.get("date") or "") <= cutoff]
-        if exclude:
-            classes = [c for c in classes if not any(
-                kw in ((c.get("title") or "") + " " + (c.get("description") or "")).lower()
-                for kw in exclude
-            )]
-        print(f"[{tag}] {name}: {len(classes)} classes parsed")
-        return sid, classes
+        classes = _apply_exclude(classes)
+        # Coverage watermark = furthest date we actually parsed. Empty parse → None
+        # (preserve existing data); otherwise trust only up to the last date we saw.
+        coverage = _max_class_date(classes)
+        _report(classes, coverage)
+        return sid, classes, coverage
     except Exception as e:
         import traceback
         print(f"[{tag}] {name}: ERROR {e}")
         traceback.print_exc()
-        return sid, []
+        return sid, [], None
 
 
-def _write_studio(studio: dict, classes: list[dict]):
-    """Phase 2 (sequential): resolve locations then write classes to DB."""
+def _write_studio(studio: dict, classes: list[dict], covered_through: str):
+    """Phase 2 (sequential): resolve locations then write classes to DB.
+
+    `covered_through` is the furthest date this scrape vouches for; it scopes the
+    prune in replace_future_classes so later-dated rows from a more-complete prior
+    run are never erased by a partial run."""
     sid = studio["id"]
     name = studio["name"]
     tag = sid[:8]
@@ -798,8 +891,8 @@ def _write_studio(studio: dict, classes: list[dict]):
                 _default_location_cache[sid] = get_default_location(sid)
             c["location_id"] = _default_location_cache[sid]
         resolved.append(c)
-    replace_future_classes(sid, resolved)
-    print(f"[{tag}] {name}: {len(resolved)} classes saved")
+    replace_future_classes(sid, resolved, covered_through)
+    print(f"[{tag}] {name}: {len(resolved)} classes saved (through {covered_through})")
 
 
 _STUDIO_TIMEOUT_SECONDS = 240
@@ -810,11 +903,15 @@ def _fetch_studio_into_queue(studio: dict, q: "mp.Queue"):
     q.put(_fetch_studio(studio))
 
 
-def _fetch_studio_with_timeout(studio: dict) -> tuple[str, list[dict]]:
+def _fetch_studio_with_timeout(studio: dict) -> tuple[str, list[dict], "str | None"]:
     """Run _fetch_studio in its own subprocess with a hard timeout and one retry.
     A thread can't be forcibly killed if Playwright/network calls hang, so a stuck
     fetch would otherwise block forever and leak a browser process. A subprocess can
-    be terminated outright, guaranteeing nothing dangles past this call."""
+    be terminated outright, guaranteeing nothing dangles past this call.
+
+    Returns the child's (sid, classes, covered_through) on success. Every failure here
+    (timeout, crash, no result, all attempts exhausted) returns covered_through=None so
+    the parent preserves the studio's existing rows rather than clearing them."""
     tag = studio["id"][:8]
     ctx = mp.get_context("spawn")
     for attempt in range(1, _STUDIO_MAX_ATTEMPTS + 1):
@@ -840,21 +937,65 @@ def _fetch_studio_with_timeout(studio: dict) -> tuple[str, list[dict]]:
         q.close()
         q.join_thread()
     print(f"[{tag}] {studio['name']}: all {_STUDIO_MAX_ATTEMPTS} attempts failed, leaving existing data untouched")
-    return studio["id"], []
+    return studio["id"], [], None
 
+
+# Default concurrency. Each worker spawns a subprocess that launches a full Chromium
+# browser (~300-700 MB + several processes), so the real footprint is many times this
+# number. 4 is safe on a 2-core/7 GB CI runner; override with SCRAPE_CONCURRENCY on a
+# larger machine.
+_DEFAULT_CONCURRENCY = 4
+
+def _concurrency_limit() -> int:
+    try:
+        n = int(os.environ.get("SCRAPE_CONCURRENCY", _DEFAULT_CONCURRENCY))
+    except ValueError:
+        n = _DEFAULT_CONCURRENCY
+    return max(1, n)
 
 def scrape_all(studios: list[dict]):
     # Fetch + parse all studios in parallel (each in its own timeout-guarded subprocess),
     # writing each studio's result to the DB as soon as it's ready rather than waiting
     # for the slowest one — one stuck studio no longer delays or blocks everyone else's data.
-    with ThreadPoolExecutor(max_workers=len(studios)) as executor:
+    if not studios:
+        print("No studios to scrape.")
+        return
+    # max_workers must be >= 1 (ThreadPoolExecutor(0) raises) and no larger than the
+    # number of studios; the env-tunable limit caps memory/CPU on small machines.
+    max_workers = min(len(studios), _concurrency_limit())
+    cutoff = (date.today() + timedelta(days=_DAYS_AHEAD)).isoformat()
+    complete, partial, failed = [], [], []  # studio names, for the end-of-run summary
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_studio = {executor.submit(_fetch_studio_with_timeout, s): s for s in studios}
         for future in as_completed(future_to_studio):
             studio = future_to_studio[future]
-            sid, classes = future.result()
-            if classes:
-                try:
-                    _write_studio(studio, classes)
-                except Exception as e:
-                    tag = studio["id"][:8]
-                    print(f"[{tag}] {studio['name']}: WRITE FAILED, skipping ({e})")
+            tag = studio["id"][:8]
+            name = studio["name"]
+            # Guard the whole body: a failure retrieving one studio's result (e.g. the
+            # OS refusing to spawn another process under load) must not abort the loop
+            # and skip every remaining studio's write.
+            try:
+                sid, classes, covered_through = future.result()
+                if covered_through is None:
+                    # Fetch/parse failed or produced nothing trustworthy — leave the
+                    # studio's existing rows in place rather than wiping them.
+                    print(f"[{tag}] {name}: not trustworthy, keeping existing data")
+                    failed.append(name)
+                    continue
+                # covered_through is a date: `classes` is authoritative for
+                # [today, covered_through]. Prune + upsert only within that range.
+                _write_studio(studio, classes, covered_through)
+                (complete if covered_through >= cutoff else partial).append(name)
+            except Exception as e:
+                print(f"[{tag}] {name}: FAILED, skipping ({e})")
+                failed.append(name)
+
+    # Run summary — makes silent partial/failed studios visible at a glance.
+    print(
+        f"\nScrape summary: {len(complete)} complete, {len(partial)} partial, "
+        f"{len(failed)} failed (of {len(studios)} studios)."
+    )
+    if partial:
+        print(f"  PARTIAL (didn't reach {cutoff}): {', '.join(sorted(partial))}")
+    if failed:
+        print(f"  FAILED (kept existing data): {', '.join(sorted(failed))}")

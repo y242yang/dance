@@ -44,18 +44,27 @@ def delete_past_classes():
     today = date.today().isoformat()
     get_client().table("classes").delete().lt("date", today).execute()
 
-def replace_future_classes(studio_id: str, classes: list[dict]):
+def replace_future_classes(studio_id: str, classes: list[dict], covered_through: str):
     """Upsert by (deterministic) id so unchanged classes keep the same id across
     scrapes — clients that reference a class by id (e.g. saved/hearted classes)
     aren't invalidated every time this runs. Classes no longer present (canceled
-    or removed) are deleted."""
-    db = get_client()
+    or removed) are deleted.
+
+    `covered_through` (YYYY-MM-DD) is the furthest date this scrape actually reached.
+    Deletion is scoped to [today, covered_through], so a run that only paginated part
+    way through the window can refresh the days it saw WITHOUT erasing later-dated rows
+    from a previous, more-complete run. Callers must not pass classes dated beyond
+    covered_through.
+
+    The prune + upsert happen atomically inside a Postgres function (see
+    sql/replace_future_classes.sql — deploy it once in the Supabase SQL editor). Doing
+    both in one transaction means a crash mid-write can't leave a studio's rows deleted
+    but not re-inserted. `today` is passed in so the DB's timezone is irrelevant.
+    """
     from datetime import date
-    today = date.today().isoformat()
-    new_ids = [c["id"] for c in classes]
-    q = db.table("classes").delete().eq("studio_id", studio_id).gte("date", today)
-    if new_ids:
-        q = q.not_.in_("id", new_ids)
-    q.execute()
-    if classes:
-        db.table("classes").upsert(classes, on_conflict="id").execute()
+    get_client().rpc("replace_future_classes", {
+        "p_studio_id": studio_id,
+        "p_today": date.today().isoformat(),
+        "p_covered_through": covered_through,
+        "p_classes": classes,
+    }).execute()

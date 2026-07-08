@@ -1,0 +1,47 @@
+name: Keepalive
+
+# GitHub disables scheduled workflows after 60 days with no repository activity, which
+# would silently pause the daily scrape. Only a COMMIT resets that inactivity clock
+# (calling the "enable workflow" API does not), so this makes a trivial commit — but
+# ONLY when the repo is approaching the cliff, so it stays quiet while you're actively
+# committing and never clutters history during normal work.
+
+on:
+  schedule:
+    # Weekly, Monday 09:13 UTC. Off the hour to avoid top-of-hour scheduling congestion.
+    - cron: "13 9 * * 1"
+  workflow_dispatch: {}
+
+# Needed to push the keepalive commit.
+permissions:
+  contents: write
+
+jobs:
+  keepalive:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # need commit history to read the last commit date
+
+      - name: Commit only if the repo is near the 60-day inactivity limit
+        run: |
+          set -euo pipefail
+          last_commit_epoch=$(git log -1 --format=%ct)
+          now_epoch=$(date +%s)
+          days_idle=$(( (now_epoch - last_commit_epoch) / 86400 ))
+          echo "Days since last commit: $days_idle"
+
+          # Reset well before the 60-day cutoff to leave margin for a missed weekly run.
+          if [ "$days_idle" -lt 50 ]; then
+            echo "Repo is active enough; no keepalive commit needed."
+            exit 0
+          fi
+
+          echo "Approaching inactivity limit — making a keepalive commit."
+          date -u +"%Y-%m-%dT%H:%M:%SZ" > .keepalive
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .keepalive
+          git commit -m "chore: keepalive (prevent scheduled-workflow auto-disable)"
+          git push
