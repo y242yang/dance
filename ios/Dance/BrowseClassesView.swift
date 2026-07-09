@@ -212,11 +212,17 @@ struct BrowseClassesView: View {
         }
     }
 
+    /// Defers a Menu selection's state mutation to the next run loop tick — see the
+    /// identical helper (and full explanation) on `DarkFilterBar` in ClassListView.swift.
+    private func selectAfterDismiss(_ update: @escaping () -> Void) {
+        DispatchQueue.main.async(execute: update)
+    }
+
     private var dateDropdown: some View {
         Menu {
-            Button("All Dates") { viewModel.selected = nil }
+            Button("All Dates") { selectAfterDismiss { viewModel.selected = nil } }
             ForEach(viewModel.chips(for: .date), id: \.self) { date in
-                Button(date.dateLabel) { viewModel.selected = date }
+                Button(date.dateLabel) { selectAfterDismiss { viewModel.selected = date } }
             }
         } label: {
             HStack {

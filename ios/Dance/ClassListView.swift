@@ -153,9 +153,9 @@ struct DarkFilterBar: View {
                         label: viewModel.selectedDate.map { $0.dateLabel } ?? "Date",
                         isActive: viewModel.selectedDate != nil
                     ) {
-                        Button("All Dates") { viewModel.selectedDate = nil }
+                        Button("All Dates") { selectAfterDismiss { viewModel.selectedDate = nil } }
                         ForEach(viewModel.availableDates, id: \.self) { d in
-                            Button(d.dateLabel) { viewModel.selectedDate = d }
+                            Button(d.dateLabel) { selectAfterDismiss { viewModel.selectedDate = d } }
                         }
                     }
 
@@ -165,9 +165,9 @@ struct DarkFilterBar: View {
                         label: viewModel.selectedCity ?? "Location",
                         isActive: viewModel.selectedCity != nil
                     ) {
-                        Button("All Locations") { viewModel.selectedCity = nil }
+                        Button("All Locations") { selectAfterDismiss { viewModel.selectedCity = nil } }
                         ForEach(viewModel.availableCities, id: \.self) { city in
-                            Button(city) { viewModel.selectedCity = city }
+                            Button(city) { selectAfterDismiss { viewModel.selectedCity = city } }
                         }
                     }
 
@@ -177,9 +177,9 @@ struct DarkFilterBar: View {
                         label: viewModel.selectedStudio ?? "Studio",
                         isActive: viewModel.selectedStudio != nil
                     ) {
-                        Button("All Studios") { viewModel.selectedStudio = nil }
+                        Button("All Studios") { selectAfterDismiss { viewModel.selectedStudio = nil } }
                         ForEach(viewModel.availableStudios, id: \.self) { studio in
-                            Button(studio) { viewModel.selectedStudio = studio }
+                            Button(studio) { selectAfterDismiss { viewModel.selectedStudio = studio } }
                         }
                     }
 
@@ -204,6 +204,16 @@ struct DarkFilterBar: View {
                 .padding(.horizontal, 16)
             }
         }
+    }
+
+    /// Defers a Menu selection's state mutation to the next run loop tick. Menu's
+    /// dismiss animation snapshots the label view at tap time; if the label's text
+    /// (and therefore its capsule width) changes in that same instant, the live
+    /// re-layout races the cached snapshot and briefly shows an unclipped/mismatched
+    /// box. Deferring the mutation lets the dismiss animation finish against the old
+    /// label first.
+    private func selectAfterDismiss(_ update: @escaping () -> Void) {
+        DispatchQueue.main.async(execute: update)
     }
 }
 
