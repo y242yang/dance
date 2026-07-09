@@ -45,6 +45,9 @@ struct DanceClass: Codable, Identifiable, Hashable {
         if style.contains("reggaeton") { return Color(red: 0.85, green: 0.45, blue: 0.10) }
         if style.contains("dancehall") { return Color(red: 0.95, green: 0.70, blue: 0.15) }
         if style.contains("salsa") || style.contains("latin") { return Color(red: 0.90, green: 0.32, blue: 0.18) }
+        if style.contains("bachata") { return Color(red: 0.80, green: 0.18, blue: 0.30) }
+        if style.contains("krump") { return Color(red: 0.45, green: 0.12, blue: 0.30) }
+        if style.contains("waacking") { return Color(red: 0.78, green: 0.15, blue: 0.65) }
         if style.contains("contemporary") || style.contains("modern") { return Color(red: 0.18, green: 0.70, blue: 0.68) }
         if style.contains("ballet") { return Color(red: 0.82, green: 0.30, blue: 0.62) }
         if style.contains("kpop") || style.contains("k-pop") { return Color(red: 0.42, green: 0.28, blue: 0.92) }
@@ -52,6 +55,9 @@ struct DanceClass: Codable, Identifiable, Hashable {
         if style.contains("house") { return Color(red: 0.18, green: 0.52, blue: 0.90) }
         if style.contains("breaking") { return Color(red: 0.20, green: 0.60, blue: 0.55) }
         if style.contains("locking") { return Color(red: 0.95, green: 0.60, blue: 0.20) }
+        if style.contains("popping") { return Color(red: 0.15, green: 0.65, blue: 0.75) }
+        if style.contains("afro") { return Color(red: 0.85, green: 0.35, blue: 0.10) }
+        if style.contains("twerk") { return Color(red: 0.95, green: 0.30, blue: 0.60) }
         if style.contains("turfing") { return Color(red: 0.30, green: 0.45, blue: 0.85) }
         if style.contains("chinese") { return Color(red: 0.80, green: 0.20, blue: 0.25) }
         if style.contains("pro dance") { return Color(red: 0.50, green: 0.50, blue: 0.55) }

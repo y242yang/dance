@@ -37,67 +37,81 @@ def _get_anthropic():
         _anthropic = anthropic.Anthropic()
     return _anthropic
 
-_LEVEL_MAP = {
-    "open": "all_levels",
-    "all levels": "all_levels",
-    "all": "all_levels",
-}
 _VALID_LEVELS = {"beginner", "intermediate", "advanced", "begin/int", "int/adv", "all_levels", "master"}
 
-_STYLE_MAP = {
-    "hip-hop": "Hip Hop",
-    "hiphop": "Hip Hop",
-    "jazz funk": "Jazz Funk",
-    "jazzfunk": "Jazz Funk",
-    "jazz-funk": "Jazz Funk",
-    "k-pop": "K-pop",
-    "kpop": "K-pop",
-    "k pop": "K-pop",
-    "k-Pop": "K-pop",
-    "house dance": "House",
-    "pro dance": "Pro Dance",
-    "chair": "Heels",  # "Chair" isn't its own style — chair-themed classes are Heels
-    "floorwork": "Heels",  # same — floorwork classes are Heels
+# Whole-word synonyms → canonical level token. Matched against WORDS in the text (via
+# re.findall below), never substrings, so "pointe"/"winter"/"advise" can't spuriously
+# trigger int/adv/etc. A slash form like "Int/Adv" tokenizes to {int, adv} → int/adv.
+_LEVEL_WORDS = {
+    "beginner": "beg", "beginners": "beg", "beg": "beg",
+    "intermediate": "int", "intermediates": "int", "inter": "int", "int": "int",
+    "advanced": "adv", "adv": "adv",
+    "master": "master", "masters": "master", "masterclass": "master",
 }
+
 _VALID_STYLES = {
     "Hip Hop", "Heels", "Jazz Funk", "K-pop", "Contemporary", "Ballet",
     "Salsa", "Reggaeton", "Dancehall", "Breaking", "House", "Vogue", "Turfing",
     "Jazz", "Chinese", "Chinese Fusion", "Pro Dance", "Choreography",
-    "Locking", "Latin",
+    "Locking", "Latin", "Popping", "Afro", "Twerk", "Krump", "Waacking", "Bachata",
 }
-# Lowercased name -> canonical style, for case-insensitive passthrough matching.
-_VALID_STYLES_LOWER = {s.lower(): s for s in _VALID_STYLES}
+
+# Ordered (priority) patterns → canonical style; first match wins. Each is matched with
+# word boundaries (\b...\b) so "warehouse" can't match "house" and "wheelchair" can't
+# match "chair". More-specific phrases precede their generic parts (jazz funk before
+# jazz, chinese fusion before chinese). [\s-]? allows "hip hop"/"hip-hop"/"hiphop" etc.
+# Keep the set of labels here in sync with _VALID_STYLES, the Haiku PROMPT, and the iOS
+# styleColor map.
+_STYLE_PATTERNS = [
+    (r"hip[\s-]?hop", "Hip Hop"),
+    (r"jazz[\s-]?funk", "Jazz Funk"),
+    (r"k[\s-]?pop", "K-pop"),
+    (r"heels", "Heels"),
+    (r"reggaeton", "Reggaeton"),
+    (r"dancehall", "Dancehall"),
+    (r"salsa", "Salsa"),
+    (r"ballet", "Ballet"),
+    (r"contemporary", "Contemporary"),
+    (r"breaking", "Breaking"),
+    (r"house", "House"),
+    (r"vogue", "Vogue"),
+    (r"turfing", "Turfing"),
+    (r"floorwork", "Heels"),
+    (r"chair", "Heels"),
+    (r"chinese\s+fusion", "Chinese Fusion"),
+    (r"chinese", "Chinese"),
+    (r"pro[\s-]?dance", "Pro Dance"),
+    (r"popping|poppin", "Popping"),
+    (r"twerk", "Twerk"),
+    (r"afrobeats?|afro", "Afro"),
+    (r"locking", "Locking"),
+    (r"krumping|krump", "Krump"),
+    (r"waacking|waack", "Waacking"),
+    (r"bachata", "Bachata"),  # before "latin": Bachata is a Latin genre but its own style
+    (r"latin", "Latin"),
+    (r"jazz", "Jazz"),
+]
 
 def _normalize_level(raw, title: str = "", description: str = "") -> str:
-    # Combine level field + title + description for clue detection
     combined = " ".join(filter(None, [str(raw or ""), title, description])).lower()
-    if not combined.strip():
-        return "all_levels"
-    s = str(raw or "").strip().lower()
-    if s in _LEVEL_MAP:
-        raw_mapped = _LEVEL_MAP[s]
-    elif s in _VALID_LEVELS:
-        raw_mapped = s
-    else:
-        raw_mapped = None
-    # "all_levels" is both a real value and our generic fallback — if that's all raw
-    # gave us, still check title/description for a more specific level before settling.
-    if raw_mapped and raw_mapped != "all_levels":
-        return raw_mapped
-    # Combo levels first (order matters — check before single levels)
-    if ("int" in combined or "inter" in combined) and "adv" in combined:
+    words = set(re.findall(r"[a-z]+", combined))
+    toks = {_LEVEL_WORDS[w] for w in words if w in _LEVEL_WORDS}
+    beg, inter, adv, master = ("beg" in toks, "int" in toks, "adv" in toks, "master" in toks)
+    if inter and adv:
         return "int/adv"
-    if "beg" in combined and ("int" in combined or "inter" in combined):
+    if beg and inter:
         return "begin/int"
-    if "master" in combined:
+    if master:
         return "master"
-    if "beg" in combined:
-        return "beginner"
-    if "adv" in combined:
+    if beg and adv:
+        return "all_levels"  # spans the whole range → treat as all levels
+    if adv:
         return "advanced"
-    if "inter" in combined or s == "int":
+    if beg:
+        return "beginner"
+    if inter:
         return "intermediate"
-    return raw_mapped or "all_levels"
+    return "all_levels"
 
 def _max_class_date(classes: list) -> "str | None":
     """The latest YYYY-MM-DD date among parsed classes, or None if there are none.
@@ -116,41 +130,29 @@ def _normalize_duration(raw) -> "int | None":
     except (ValueError, TypeError):
         return None
 
-def _normalize_style(raw, title: str = "", description: str = "") -> str:
-    combined = " ".join(filter(None, [title, description])).lower()
-    # Heels classes are frequently themed around another genre or prop (e.g. "Reggaeton
-    # Heels", "Chair Heels") — Heels is the actual technique/style being taught, so it
-    # wins over whatever raw value (or theme) the source page or Haiku assigned.
-    if "heels" in combined:
-        return "Heels"
-    s = str(raw or "").strip()
-    lower = s.lower()
-    if lower in _STYLE_MAP:
-        raw_mapped = _STYLE_MAP[lower]
-    elif lower in _VALID_STYLES_LOWER:
-        # Match valid styles case-insensitively so a correctly-named style in the wrong
-        # case (e.g. "reggaeton") maps to its canonical form instead of falling through.
-        raw_mapped = _VALID_STYLES_LOWER[lower]
-    else:
-        raw_mapped = None
-    # "Choreography" is both a real value and our generic fallback — if that's all raw
-    # gave us, still check title/description for a more specific style before settling.
-    if raw_mapped and raw_mapped != "Choreography":
-        return raw_mapped
-    for keyword, label in [
-        ("hip hop", "Hip Hop"), ("hiphop", "Hip Hop"), ("hip-hop", "Hip Hop"),
-        ("jazz funk", "Jazz Funk"), ("jazzfunk", "Jazz Funk"),
-        ("k-pop", "K-pop"), ("kpop", "K-pop"), ("k pop", "K-pop"),
-        ("heels", "Heels"), ("reggaeton", "Reggaeton"), ("dancehall", "Dancehall"), ("salsa", "Salsa"),
-        ("ballet", "Ballet"), ("contemporary", "Contemporary"),
-        ("breaking", "Breaking"), ("house", "House"), ("vogue", "Vogue"),
-        ("turfing", "Turfing"), ("floorwork", "Heels"), ("chair", "Heels"),
-        ("jazz", "Jazz"), ("chinese", "Chinese"), ("pro dance", "Pro Dance"),
-        ("locking", "Locking"), ("latin", "Latin"),
-    ]:
-        if keyword in combined:
+def _match_style(text: str) -> "str | None":
+    """First style whose whole-word/phrase pattern appears in `text`, else None.
+    Word boundaries prevent substring false-positives (warehouse≠house, wheelchair≠chair)."""
+    if not text:
+        return None
+    t = text.lower()
+    for pattern, label in _STYLE_PATTERNS:
+        if re.search(r"\b(?:" + pattern + r")\b", t):
             return label
-    return raw_mapped or "Choreography"
+    return None
+
+def _normalize_style(raw, title: str = "", description: str = "") -> str:
+    combined = " ".join(filter(None, [title, description]))
+    # 1. Classify normally: trust Haiku's own dance_style label first, then fall back to
+    #    clues in the title/description, then the generic "Choreography" default.
+    style = _match_style(str(raw or "")) or _match_style(combined) or "Choreography"
+    # 2. Apply overrides LAST, so the final rewrite wins over the base classification.
+    #    Heels classes are frequently themed around another genre or prop (e.g. "Reggaeton
+    #    Heels", "Chair Heels") — Heels is the actual technique being taught, so a "heels"
+    #    mention overrides whatever style step 1 picked.
+    if re.search(r"\bheels\b", combined.lower()):
+        style = "Heels"
+    return style
 
 # Fallback keyword exclusions when exclude_keywords column is absent from DB
 STUDIO_EXCLUDES = {
@@ -164,7 +166,7 @@ PROMPT = """You are extracting dance class schedule data from a studio website.
 
 Extract every class listed and return a JSON array. Each class object must have:
 - title: class name (string)
-- dance_style: use these exact labels only — "Hip Hop", "Heels", "Jazz Funk", "K-pop", "Contemporary", "Ballet", "Salsa", "Reggaeton", "Dancehall", "Breaking", "House", "Vogue", "Turfing", "Jazz", "Chinese", "Chinese Fusion", "Pro Dance", "Locking", "Latin", "Choreography". Pick the closest match — Dancehall and Reggaeton are different genres, don't conflate them. Chair- and floorwork-themed classes should be labeled "Heels", not a separate style. Use "Choreography" as the fallback if none fit. (string or null)
+- dance_style: use these exact labels only — "Hip Hop", "Heels", "Jazz Funk", "K-pop", "Contemporary", "Ballet", "Salsa", "Reggaeton", "Dancehall", "Breaking", "House", "Vogue", "Turfing", "Jazz", "Chinese", "Chinese Fusion", "Pro Dance", "Popping", "Afro", "Twerk", "Krump", "Waacking", "Bachata", "Locking", "Latin", "Choreography". Pick the closest match — Dancehall and Reggaeton are different genres, don't conflate them. Chair- and floorwork-themed classes should be labeled "Heels", not a separate style. Use "Choreography" as the fallback if none fit. (string or null)
 - instructor: teacher name (string or null)
 - level: one of "beginner", "intermediate", "advanced", "begin/int", "int/adv", "all_levels" (string). Rules:
     * Check the level field first, then look for clues in the class title and description.
