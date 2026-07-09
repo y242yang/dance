@@ -43,7 +43,7 @@ _VALID_LEVELS = {"beginner", "intermediate", "advanced", "begin/int", "int/adv",
 # re.findall below), never substrings, so "pointe"/"winter"/"advise" can't spuriously
 # trigger int/adv/etc. A slash form like "Int/Adv" tokenizes to {int, adv} → int/adv.
 _LEVEL_WORDS = {
-    "beginner": "beg", "beginners": "beg", "beg": "beg",
+    "beginner": "beg", "beginners": "beg", "beg": "beg", "beginning": "beg",
     "intermediate": "int", "intermediates": "int", "inter": "int", "int": "int",
     "advanced": "adv", "adv": "adv",
     "master": "master", "masters": "master", "masterclass": "master",
@@ -546,6 +546,64 @@ def _fetch_eds_classes(studio_id: str, days_ahead: int = 14) -> list[dict]:
     return classes
 
 
+def _fetch_healcode_widget(url: str, studio_id: str, days_ahead: int = 14) -> list[dict]:
+    """Fetch a Mindbody "Healcode" branded-web-widget schedule directly via its
+    load_markup JSON endpoint (e.g. https://widgets.mindbodyonline.com/widgets/schedules/<id>/load_markup).
+
+    This is the widget a studio's own site embeds inline — distinct from (and NOT behind
+    the Cloudflare bot-check that guards) the outbound "classic" Mindbody booking page
+    those sites often also link to. A single GET with start_date/end_date returns the
+    whole window in one shot: no Playwright, no pagination/clicking, no Cloudflare.
+
+    The markup exposes explicit machine-readable fields (ISO datetimes, name, staff), so
+    this skips Haiku entirely and regex-parses it directly — same rationale as the EDS
+    direct-API path: more reliable than trusting an LLM to infer dates from prose, and
+    free of token/chunking limits.
+    """
+    today = date.today()
+    cutoff = today + timedelta(days=days_ahead)
+    resp = http_requests.get(
+        url,
+        params={"options[start_date]": today.isoformat(), "options[end_date]": cutoff.isoformat()},
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=30,
+    )
+    html = resp.json().get("class_sessions", "")
+    classes = []
+    for chunk in re.split(r'(?=<div class="bw-session" id=)', html)[1:]:
+        start_m = re.search(r'class="hc_starttime" datetime="(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})"', chunk)
+        end_m = re.search(r'class="hc_endtime" datetime="\d{4}-\d{2}-\d{2}T(\d{2}):(\d{2})"', chunk)
+        name_m = re.search(
+            r'bw-session__name">\s*(?:<span class="bw-session__type"[^>]*>([^<]*)</span>)?\s*([^<\n]+)', chunk)
+        staff_m = re.search(r'bw-session__staff"[^>]*>\s*([^<\n]+)', chunk)
+        if not start_m or not name_m:
+            continue
+        title = ((name_m.group(1) or "") + (name_m.group(2) or "")).strip()
+        if not title or "online" in title.lower():
+            continue  # in-person only — the widget lists an "(Online)" twin of every class
+        date_str, sh, sm = start_m.group(1), int(start_m.group(2)), int(start_m.group(3))
+        duration = None
+        if end_m:
+            eh, em = int(end_m.group(1)), int(end_m.group(2))
+            duration = (eh * 60 + em) - (sh * 60 + sm)
+        instructor = staff_m.group(1).strip() if staff_m else None
+        classes.append({
+            "studio_id": studio_id,
+            "title": title,
+            "instructor": instructor or None,
+            "date": date_str,
+            "start_time": f"{sh:02d}:{sm:02d}:00",
+            "duration_minutes": _normalize_duration(duration),
+            # Not text-matched: level-graded titles like "Intermediate/Advanced (In
+            # Person)" don't contain the word "ballet" at all, but this studio teaches
+            # nothing else, so the style is a known constant rather than inferred.
+            "dance_style": "Ballet",
+            "level": _normalize_level(None, title, ""),
+            "description": None,
+        })
+    return classes
+
+
 def fetch_page_text(url: str, days_ahead: int = 1) -> str:
     if "my.eds.dance" in url:
         return ""  # EDS handled directly in _fetch_studio via _fetch_eds_classes
@@ -832,6 +890,16 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
         # non-empty result is authoritative through the full cutoff.
         if any("my.eds.dance" in u for u in urls):
             classes = _apply_exclude(_fetch_eds_classes(sid, days_ahead=_DAYS_AHEAD))
+            coverage = cutoff if classes else None
+            _report(classes, coverage)
+            return sid, classes, coverage
+
+        # Healcode (Mindbody branded web widget): skip Haiku — the widget's own
+        # load_markup endpoint returns the whole [today, cutoff] window in one call with
+        # explicit machine-readable fields, so a non-empty result is authoritative
+        # through the full cutoff, same as EDS above.
+        if any("widgets.mindbodyonline.com/widgets/schedules" in u for u in urls):
+            classes = _apply_exclude(_fetch_healcode_widget(urls[0], sid, days_ahead=_DAYS_AHEAD))
             coverage = cutoff if classes else None
             _report(classes, coverage)
             return sid, classes, coverage
