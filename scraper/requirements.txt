@@ -1,5 +1,9 @@
 playwright==1.44.0
 anthropic==0.28.0
+# httpx>=0.28 removed the `proxies` kwarg that anthropic 0.28.0 passes to httpx.Client,
+# which crashes every Haiku call ("unexpected keyword argument 'proxies'"). Pin to the
+# last 0.27.x, which still has `proxies` and is compatible with supabase 2.31.0 too.
+httpx==0.27.2
 supabase==2.31.0
 websockets==15.0.1
 python-dotenv==1.0.1
