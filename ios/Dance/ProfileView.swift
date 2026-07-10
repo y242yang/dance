@@ -21,6 +21,9 @@ struct ProfileView: View {
     @State private var selectedEntry: LogEntry?
     @State private var avatarPickerItem: PhotosPickerItem?
     @State private var followListKind: FollowListView.Kind?
+    @State private var showDeleteConfirmation = false
+    @State private var isDeletingAccount = false
+    @State private var deleteAccountError: String?
     @State private var isUploadingAvatar = false
     @State private var localAvatarImage: UIImage?
 
@@ -123,7 +126,21 @@ struct ProfileView: View {
             }
             .listRowBackground(kBg)
             .listRowSeparator(.hidden)
-            .listRowInsets(EdgeInsets(top: 24, leading: 16, bottom: 32, trailing: 16))
+            .listRowInsets(EdgeInsets(top: 24, leading: 16, bottom: 4, trailing: 16))
+
+            Button(role: .destructive) {
+                showDeleteConfirmation = true
+            } label: {
+                Text("Delete Account")
+                    .font(.subheadline).fontWeight(.semibold)
+                    .foregroundStyle(kTertiary)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+            }
+            .disabled(isDeletingAccount)
+            .listRowBackground(kBg)
+            .listRowSeparator(.hidden)
+            .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 32, trailing: 16))
         }
         .listStyle(.plain)
         .background(kBg)
@@ -149,6 +166,19 @@ struct ProfileView: View {
         .task { await loadAll() }
         .task(id: savedStore.savedIds) { await fetchSavedClasses() }
         .refreshable { await loadAll() }
+        .alert("Delete Account", isPresented: $showDeleteConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Delete", role: .destructive) {
+                Task { await deleteAccount() }
+            }
+        } message: {
+            Text("This permanently deletes your profile, followers, saved classes, and class log. This can't be undone.")
+        }
+        .alert("Couldn't Delete Account", isPresented: .constant(deleteAccountError != nil)) {
+            Button("OK") { deleteAccountError = nil }
+        } message: {
+            Text(deleteAccountError ?? "")
+        }
     }
 
     private var header: some View {
@@ -322,6 +352,16 @@ struct ProfileView: View {
             notes: "",
             sourceClassId: cls.id.uuidString
         )
+    }
+
+    private func deleteAccount() async {
+        isDeletingAccount = true
+        defer { isDeletingAccount = false }
+        do {
+            try await authStore.deleteAccount()
+        } catch {
+            deleteAccountError = error.localizedDescription
+        }
     }
 
     private func loadAll() async {

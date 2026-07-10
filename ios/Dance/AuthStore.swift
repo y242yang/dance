@@ -123,6 +123,16 @@ final class AuthStore: NSObject {
         try await supabase.auth.signOut()
     }
 
+    /// Permanently deletes the account (Apple Guideline 5.1.1(v) requires this
+    /// be possible from within the app, not just by contacting support). Runs
+    /// server-side via an Edge Function since it needs the service role key,
+    /// which never ships in the client. Cascades to profiles/follows/
+    /// saved_classes/log_entries automatically once the auth user is gone.
+    func deleteAccount() async throws {
+        try await supabase.functions.invoke("delete-account")
+        try await supabase.auth.signOut()
+    }
+
     private static func randomNonceString(length: Int = 32) -> String {
         let charset: [Character] = Array("0123456789ABCDEFGHIJKLMNOPQRSTUVXYZabcdefghijklmnopqrstuvwxyz-._")
         var result = ""
