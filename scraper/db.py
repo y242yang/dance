@@ -37,12 +37,21 @@ def get_default_location(studio_id: str) -> Optional[str]:
     return result[0]["id"] if result else None
 
 def delete_past_classes():
-    """Remove classes whose date has already passed. Safe for clients: the app's
-    Saved view already filters to date >= today, and "My Class Log" is stored
-    locally on-device and doesn't reference this table."""
+    """Remove classes whose date has already passed. saved_classes rows for these
+    classes cascade-delete automatically (FK ON DELETE CASCADE); class-sourced
+    log_entries rows do too. Manually-typed log entries aren't tied to a class row,
+    so they're handled separately by delete_past_log_entries()."""
     from datetime import date
     today = date.today().isoformat()
     get_client().table("classes").delete().lt("date", today).execute()
+
+def delete_past_log_entries():
+    """Remove log entries whose date has already passed. Covers both class-sourced
+    entries (belt-and-suspenders alongside the FK cascade in delete_past_classes)
+    and manually-typed entries, which have no classes row to cascade from."""
+    from datetime import date
+    today = date.today().isoformat()
+    get_client().table("log_entries").delete().lt("date", today).execute()
 
 def replace_future_classes(studio_id: str, classes: list[dict], covered_through: str):
     """Upsert by (deterministic) id so unchanged classes keep the same id across

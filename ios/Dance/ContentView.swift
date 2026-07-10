@@ -2,6 +2,8 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var selectedTab = 0
+    @Environment(AuthStore.self) private var authStore
+    @Environment(SavedStore.self) private var savedStore
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -18,13 +20,29 @@ struct ContentView: View {
             .tag(1)
 
             NavigationStack {
-                SavedView()
+                profileTabContent
             }
-            .tabItem { Label("Saved", systemImage: "heart") }
+            .tabItem { Label("Profile", systemImage: "person.crop.circle") }
             .tag(2)
-
         }
         .tint(Color(red: 0.62, green: 0.35, blue: 1.0))
+        .onChange(of: authStore.username) { _, newValue in
+            savedStore.userId = newValue != nil ? authStore.currentUserId : nil
+        }
+        .onChange(of: authStore.currentUserId) { _, newValue in
+            if newValue == nil { savedStore.userId = nil }
+        }
+    }
+
+    @ViewBuilder
+    private var profileTabContent: some View {
+        if !authStore.isSignedIn {
+            AuthView()
+        } else if authStore.needsUsername {
+            ChooseUsernameView()
+        } else {
+            ProfileView()
+        }
     }
 }
 

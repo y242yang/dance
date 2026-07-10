@@ -7,8 +7,15 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D3BBFD098EC645E49E29146E /* AuthStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6BD0A03604D4002873D2AA4 /* AuthStore.swift */; };
+		461899E44D80496E87AE25BF /* AuthView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEE041C820CA45B4B6ADCD9C /* AuthView.swift */; };
+		0B5345F162A747E6A37DF2D2 /* ChooseUsernameView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7B2110CA9B8D4E8DAC844585 /* ChooseUsernameView.swift */; };
+		6C16A830E3CC4A56BCE0884E /* ProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 464C003EA456489787DF0851 /* ProfileView.swift */; };
+		8683A13B0FF0451BA289A3F5 /* UserProfileView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D67EB5C8AFC54FCA9BEF7A4B /* UserProfileView.swift */; };
+		735B19301BCA4AE2A50916B2 /* FollowRequestsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59A2B911CC3543C18E92C0AF /* FollowRequestsView.swift */; };
+		01501F1EF445413FB5673E60 /* FollowListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3F4D367E35946ABAA3C21A4 /* FollowListView.swift */; };
+		9B76D1E062E943009B0A477A /* UserSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3FEA8CD8827B4CB7BC0DA8E4 /* UserSearchView.swift */; };
 		661A9D34C6E18B8CA31C5913 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2AD57E8B321648F5AD283DB1 /* Models.swift */; };
-		68900186FFFC30129C31B002 /* BrowseClassesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34FBA672549E73CBA0635E9E /* BrowseClassesView.swift */; };
 		68B8701D84A6B91DCACACBBD /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5E3DFE42EB18E6A030B6B594 /* ContentView.swift */; };
 		6E2D9AF76A8407C176A3B22A /* ClassListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A49180712B3BD1E5E47EF53 /* ClassListView.swift */; };
 		7874DE850B04393794016788 /* LearnMoreView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7A99AC0BDE8DE9246643234 /* LearnMoreView.swift */; };
@@ -21,22 +28,39 @@
 		C8E12BCF0E744C6DE2A1FDBA /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3368E91C529AC1233573A5B7 /* HomeView.swift */; };
 		CACD0B3A7421DD7D59AD9A35 /* DanceViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91171AA015DE9B3ECB4DED12 /* DanceViewModel.swift */; };
 		D2417E826B09C29D80C6EFF5 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = F08F656213C5F505DFD10532 /* Assets.xcassets */; };
-		E32DE18E22F3D4EEF2A1D7DC /* LocationClassView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E26DCEE6ED2A624B9F126D8 /* LocationClassView.swift */; };
 		E76FA80CAFACBAD626629DE1 /* DanceApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EA99371373F8A0470896627F /* DanceApp.swift */; };
 		E856004ACAE56E150EDE5263 /* StudioListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8CAB7C33C8C56ADA347F620E /* StudioListView.swift */; };
+		14FC3AF7FF194372B3D0EA3A /* LogEntryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC8A3950A7DF41C6BC5DC4B7 /* LogEntryTests.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		1BDB9003E83548CE90E7BDEA /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 9C16DC9FCD5AA99CD5C2C837 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 429ABEC42A24932EE5E9820C;
+			remoteInfo = Dance;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		A6BD0A03604D4002873D2AA4 /* AuthStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthStore.swift; sourceTree = "<group>"; };
+		CEE041C820CA45B4B6ADCD9C /* AuthView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AuthView.swift; sourceTree = "<group>"; };
+		F3B6C8A9D0E14F2B8A0D9E01 /* Dance.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Dance.entitlements; sourceTree = "<group>"; };
+		7B2110CA9B8D4E8DAC844585 /* ChooseUsernameView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChooseUsernameView.swift; sourceTree = "<group>"; };
+		464C003EA456489787DF0851 /* ProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProfileView.swift; sourceTree = "<group>"; };
+		D67EB5C8AFC54FCA9BEF7A4B /* UserProfileView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserProfileView.swift; sourceTree = "<group>"; };
+		59A2B911CC3543C18E92C0AF /* FollowRequestsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowRequestsView.swift; sourceTree = "<group>"; };
+		E3F4D367E35946ABAA3C21A4 /* FollowListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowListView.swift; sourceTree = "<group>"; };
+		3FEA8CD8827B4CB7BC0DA8E4 /* UserSearchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UserSearchView.swift; sourceTree = "<group>"; };
 		2AD57E8B321648F5AD283DB1 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		3368E91C529AC1233573A5B7 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
-		34FBA672549E73CBA0635E9E /* BrowseClassesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrowseClassesView.swift; sourceTree = "<group>"; };
 		40DEADAA1F403B6AA98F1920 /* SavedStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedStore.swift; sourceTree = "<group>"; };
 		4181904E88699FDE1CD6AE67 /* SavedView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SavedView.swift; sourceTree = "<group>"; };
 		5E3DFE42EB18E6A030B6B594 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		78398E8CB98F30755AEF78D1 /* SupabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SupabaseClient.swift; sourceTree = "<group>"; };
 		7D07CC2AB5EE6D43C88603C6 /* Dance.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Dance.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		8CAB7C33C8C56ADA347F620E /* StudioListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StudioListView.swift; sourceTree = "<group>"; };
-		8E26DCEE6ED2A624B9F126D8 /* LocationClassView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationClassView.swift; sourceTree = "<group>"; };
 		91171AA015DE9B3ECB4DED12 /* DanceViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DanceViewModel.swift; sourceTree = "<group>"; };
 		9A49180712B3BD1E5E47EF53 /* ClassListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClassListView.swift; sourceTree = "<group>"; };
 		9EC767F6EE91A9FE2BF070B7 /* WorkshopsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkshopsView.swift; sourceTree = "<group>"; };
@@ -45,6 +69,8 @@
 		EA99371373F8A0470896627F /* DanceApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DanceApp.swift; sourceTree = "<group>"; };
 		F08F656213C5F505DFD10532 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		FA77EB82DBAE7F4B5DFEEBE3 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		CC8A3950A7DF41C6BC5DC4B7 /* LogEntryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogEntryTests.swift; sourceTree = "<group>"; };
+		E22C62F203234069BF4043CD /* DanceTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = DanceTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -56,6 +82,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		AD6B7E00F8DE434EB9CACCCF /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -63,30 +96,46 @@
 			isa = PBXGroup;
 			children = (
 				F08F656213C5F505DFD10532 /* Assets.xcassets */,
-				34FBA672549E73CBA0635E9E /* BrowseClassesView.swift */,
+				A6BD0A03604D4002873D2AA4 /* AuthStore.swift */,
+				CEE041C820CA45B4B6ADCD9C /* AuthView.swift */,
+				7B2110CA9B8D4E8DAC844585 /* ChooseUsernameView.swift */,
 				BC57E290C3228E8D731A64A9 /* ClassDetailView.swift */,
 				9A49180712B3BD1E5E47EF53 /* ClassListView.swift */,
 				5E3DFE42EB18E6A030B6B594 /* ContentView.swift */,
 				EA99371373F8A0470896627F /* DanceApp.swift */,
+				F3B6C8A9D0E14F2B8A0D9E01 /* Dance.entitlements */,
 				91171AA015DE9B3ECB4DED12 /* DanceViewModel.swift */,
+				E3F4D367E35946ABAA3C21A4 /* FollowListView.swift */,
+				59A2B911CC3543C18E92C0AF /* FollowRequestsView.swift */,
 				3368E91C529AC1233573A5B7 /* HomeView.swift */,
 				FA77EB82DBAE7F4B5DFEEBE3 /* Info.plist */,
 				D7A99AC0BDE8DE9246643234 /* LearnMoreView.swift */,
-				8E26DCEE6ED2A624B9F126D8 /* LocationClassView.swift */,
 				2AD57E8B321648F5AD283DB1 /* Models.swift */,
+				464C003EA456489787DF0851 /* ProfileView.swift */,
 				40DEADAA1F403B6AA98F1920 /* SavedStore.swift */,
 				4181904E88699FDE1CD6AE67 /* SavedView.swift */,
 				8CAB7C33C8C56ADA347F620E /* StudioListView.swift */,
 				78398E8CB98F30755AEF78D1 /* SupabaseClient.swift */,
+				D67EB5C8AFC54FCA9BEF7A4B /* UserProfileView.swift */,
+				3FEA8CD8827B4CB7BC0DA8E4 /* UserSearchView.swift */,
 				9EC767F6EE91A9FE2BF070B7 /* WorkshopsView.swift */,
 			);
 			path = Dance;
+			sourceTree = "<group>";
+		};
+		035F7E7BBB3049E6B15C851D /* DanceTests */ = {
+			isa = PBXGroup;
+			children = (
+				CC8A3950A7DF41C6BC5DC4B7 /* LogEntryTests.swift */,
+			);
+			path = DanceTests;
 			sourceTree = "<group>";
 		};
 		1B3D99700ED665E811A52ED1 = {
 			isa = PBXGroup;
 			children = (
 				0963E15836C6C7D250F11997 /* Dance */,
+				035F7E7BBB3049E6B15C851D /* DanceTests */,
 				88253E97DD0894868636B3EA /* Products */,
 			);
 			sourceTree = "<group>";
@@ -95,6 +144,7 @@
 			isa = PBXGroup;
 			children = (
 				7D07CC2AB5EE6D43C88603C6 /* Dance.app */,
+				E22C62F203234069BF4043CD /* DanceTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -122,6 +172,24 @@
 			productReference = 7D07CC2AB5EE6D43C88603C6 /* Dance.app */;
 			productType = "com.apple.product-type.application";
 		};
+		BB0F66C36CB249878BFE384F /* DanceTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 817AC2761B014BB29770ED0B /* Build configuration list for PBXNativeTarget "DanceTests" */;
+			buildPhases = (
+				B169104D4C3D404B8681C253 /* Sources */,
+				84CCCE48F6DA428FB1531795 /* Resources */,
+				AD6B7E00F8DE434EB9CACCCF /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				9E9BC7BE5D634E67BB471A7A /* PBXTargetDependency */,
+			);
+			name = DanceTests;
+			productName = DanceTests;
+			productReference = E22C62F203234069BF4043CD /* DanceTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -134,6 +202,12 @@
 					429ABEC42A24932EE5E9820C = {
 						DevelopmentTeam = Y2HHD36TDG;
 						ProvisioningStyle = Automatic;
+					};
+					BB0F66C36CB249878BFE384F = {
+						CreatedOnToolsVersion = 16.0;
+						DevelopmentTeam = Y2HHD36TDG;
+						ProvisioningStyle = Automatic;
+						TestTargetID = 429ABEC42A24932EE5E9820C;
 					};
 				};
 			};
@@ -155,6 +229,7 @@
 			projectRoot = "";
 			targets = (
 				429ABEC42A24932EE5E9820C /* Dance */,
+				BB0F66C36CB249878BFE384F /* DanceTests */,
 			);
 		};
 /* End PBXProject section */
@@ -168,6 +243,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		84CCCE48F6DA428FB1531795 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -175,25 +257,47 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				68900186FFFC30129C31B002 /* BrowseClassesView.swift in Sources */,
+				D3BBFD098EC645E49E29146E /* AuthStore.swift in Sources */,
+				461899E44D80496E87AE25BF /* AuthView.swift in Sources */,
+				0B5345F162A747E6A37DF2D2 /* ChooseUsernameView.swift in Sources */,
 				AAF0C8A8E9AFF1C901789FBE /* ClassDetailView.swift in Sources */,
 				6E2D9AF76A8407C176A3B22A /* ClassListView.swift in Sources */,
 				68B8701D84A6B91DCACACBBD /* ContentView.swift in Sources */,
 				E76FA80CAFACBAD626629DE1 /* DanceApp.swift in Sources */,
 				CACD0B3A7421DD7D59AD9A35 /* DanceViewModel.swift in Sources */,
+				01501F1EF445413FB5673E60 /* FollowListView.swift in Sources */,
+				735B19301BCA4AE2A50916B2 /* FollowRequestsView.swift in Sources */,
 				C8E12BCF0E744C6DE2A1FDBA /* HomeView.swift in Sources */,
 				7874DE850B04393794016788 /* LearnMoreView.swift in Sources */,
-				E32DE18E22F3D4EEF2A1D7DC /* LocationClassView.swift in Sources */,
 				661A9D34C6E18B8CA31C5913 /* Models.swift in Sources */,
+				6C16A830E3CC4A56BCE0884E /* ProfileView.swift in Sources */,
 				7C7BB3154A75693322662B61 /* SavedStore.swift in Sources */,
 				8C8FEE76F536B3E2E8A9C504 /* SavedView.swift in Sources */,
 				E856004ACAE56E150EDE5263 /* StudioListView.swift in Sources */,
 				A135144F526D02580D32A3BA /* SupabaseClient.swift in Sources */,
+				8683A13B0FF0451BA289A3F5 /* UserProfileView.swift in Sources */,
+				9B76D1E062E943009B0A477A /* UserSearchView.swift in Sources */,
 				AE904655E9E1DFE40A7759A1 /* WorkshopsView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B169104D4C3D404B8681C253 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				14FC3AF7FF194372B3D0EA3A /* LogEntryTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		9E9BC7BE5D634E67BB471A7A /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 429ABEC42A24932EE5E9820C /* Dance */;
+			targetProxy = 1BDB9003E83548CE90E7BDEA /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		1A283AE566DFE18C9EEE3C28 /* Release */ = {
@@ -257,6 +361,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Dance/Dance.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = Y2HHD36TDG;
@@ -342,6 +447,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = Dance/Dance.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
 				DEVELOPMENT_TEAM = Y2HHD36TDG;
@@ -356,6 +462,40 @@
 				SDKROOT = iphoneos;
 				SWIFT_VERSION = 5.9;
 				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
+		2A212887A54449D3810D2E58 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = Y2HHD36TDG;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.annyang.dance.DanceTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Dance.app/Dance";
+			};
+			name = Debug;
+		};
+		9DBEE27354EB4025ACFD2AB3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				DEVELOPMENT_TEAM = Y2HHD36TDG;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.annyang.dance.DanceTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.9;
+				TARGETED_DEVICE_FAMILY = 1;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Dance.app/Dance";
 			};
 			name = Release;
 		};
@@ -376,6 +516,15 @@
 			buildConfigurations = (
 				C8C91A1EDFD571C92FA1A7EC /* Debug */,
 				1A283AE566DFE18C9EEE3C28 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		817AC2761B014BB29770ED0B /* Build configuration list for PBXNativeTarget "DanceTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2A212887A54449D3810D2E58 /* Debug */,
+				9DBEE27354EB4025ACFD2AB3 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

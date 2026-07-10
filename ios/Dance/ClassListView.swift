@@ -8,6 +8,7 @@ private let kTertiary = Color(white: 0.38)
 struct ClassListView: View {
     @State private var viewModel = DanceViewModel()
     @Environment(SavedStore.self) private var savedStore
+    @Environment(AuthStore.self) private var authStore
 
     var body: some View {
         ZStack {
@@ -69,7 +70,7 @@ struct ClassListView: View {
                                     NavigationLink(value: cls) {
                                         DarkClassRow(cls: cls,
                                             isSaved: savedStore.isSaved(cls.id),
-                                            onToggleSave: { savedStore.toggle(cls.id) })
+                                            onToggleSave: authStore.isSignedIn ? { savedStore.toggle(cls.id) } : nil)
                                     }
                                     .buttonStyle(.plain)
                                     .padding(.horizontal, 16)
@@ -151,11 +152,12 @@ struct DarkFilterBar: View {
                     FilterDropdown(
                         icon: "calendar",
                         label: viewModel.selectedDate.map { $0.dateLabel } ?? "Date",
-                        isActive: viewModel.selectedDate != nil
+                        isActive: viewModel.selectedDate != nil,
+                        labelWidth: 70
                     ) {
-                        Button("All Dates") { selectAfterDismiss { viewModel.selectedDate = nil } }
+                        Button("All Dates") { viewModel.selectedDate = nil }
                         ForEach(viewModel.availableDates, id: \.self) { d in
-                            Button(d.dateLabel) { selectAfterDismiss { viewModel.selectedDate = d } }
+                            Button(d.dateLabel) { viewModel.selectedDate = d }
                         }
                     }
 
@@ -163,11 +165,12 @@ struct DarkFilterBar: View {
                     FilterDropdown(
                         icon: "mappin",
                         label: viewModel.selectedCity ?? "Location",
-                        isActive: viewModel.selectedCity != nil
+                        isActive: viewModel.selectedCity != nil,
+                        labelWidth: 85
                     ) {
-                        Button("All Locations") { selectAfterDismiss { viewModel.selectedCity = nil } }
+                        Button("All Locations") { viewModel.selectedCity = nil }
                         ForEach(viewModel.availableCities, id: \.self) { city in
-                            Button(city) { selectAfterDismiss { viewModel.selectedCity = city } }
+                            Button(city) { viewModel.selectedCity = city }
                         }
                     }
 
@@ -175,11 +178,12 @@ struct DarkFilterBar: View {
                     FilterDropdown(
                         icon: "building.2",
                         label: viewModel.selectedStudio ?? "Studio",
-                        isActive: viewModel.selectedStudio != nil
+                        isActive: viewModel.selectedStudio != nil,
+                        labelWidth: 100
                     ) {
-                        Button("All Studios") { selectAfterDismiss { viewModel.selectedStudio = nil } }
+                        Button("All Studios") { viewModel.selectedStudio = nil }
                         ForEach(viewModel.availableStudios, id: \.self) { studio in
-                            Button(studio) { selectAfterDismiss { viewModel.selectedStudio = studio } }
+                            Button(studio) { viewModel.selectedStudio = studio }
                         }
                     }
 
@@ -205,22 +209,13 @@ struct DarkFilterBar: View {
             }
         }
     }
-
-    /// Defers a Menu selection's state mutation to the next run loop tick. Menu's
-    /// dismiss animation snapshots the label view at tap time; if the label's text
-    /// (and therefore its capsule width) changes in that same instant, the live
-    /// re-layout races the cached snapshot and briefly shows an unclipped/mismatched
-    /// box. Deferring the mutation lets the dismiss animation finish against the old
-    /// label first.
-    private func selectAfterDismiss(_ update: @escaping () -> Void) {
-        DispatchQueue.main.async(execute: update)
-    }
 }
 
 struct FilterDropdown<Content: View>: View {
     let icon: String
     let label: String
     let isActive: Bool
+    var labelWidth: CGFloat = 100
     @ViewBuilder let content: () -> Content
 
     var body: some View {
@@ -229,7 +224,10 @@ struct FilterDropdown<Content: View>: View {
         } label: {
             HStack(spacing: 5) {
                 Image(systemName: icon).imageScale(.small)
-                Text(label).lineLimit(1)
+                Text(label)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(width: labelWidth, alignment: .leading)
                 Image(systemName: "chevron.down").imageScale(.small)
             }
             .font(.subheadline)
@@ -268,6 +266,8 @@ struct DarkChip: View {
 struct DarkClassRow: View {
     let cls: DanceClass
     var isSaved: Bool = false
+    var isShared: Bool = false
+    var showDate: Bool = false
     var onToggleSave: (() -> Void)? = nil
 
     var body: some View {
@@ -283,6 +283,12 @@ struct DarkClassRow: View {
                         .foregroundStyle(.white)
                         .lineLimit(2)
                     Spacer()
+                    if isShared {
+                        Image(systemName: "person.2.fill")
+                            .font(.system(size: 11))
+                            .foregroundStyle(Color(red: 0.62, green: 0.35, blue: 1.0))
+                            .help("You've both done this class")
+                    }
                     if let level = cls.level {
                         Text(level.levelDisplayName)
                             .font(.caption2).fontWeight(.medium)
@@ -311,7 +317,10 @@ struct DarkClassRow: View {
                 }
 
                 HStack(spacing: 4) {
-                    Image(systemName: "clock").imageScale(.small)
+                    Image(systemName: showDate ? "calendar" : "clock").imageScale(.small)
+                    if showDate {
+                        Text(cls.date.dateLabel + " ·")
+                    }
                     Text(cls.formattedTime)
                     if let dur = cls.durationMinutes { Text("· \(dur) min") }
                 }

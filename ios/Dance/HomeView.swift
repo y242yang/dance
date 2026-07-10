@@ -2,6 +2,7 @@ import SwiftUI
 
 struct HomeView: View {
     @Binding var selectedTab: Int
+    @Environment(AuthStore.self) private var authStore
 
     var body: some View {
         ZStack {
@@ -11,6 +12,12 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HeroHeader(onBrowseAll: { selectedTab = 1 })
 
+                    if !authStore.isSignedIn {
+                        CreateProfileCard(onSignIn: { selectedTab = 2 })
+                            .padding(.horizontal, 20)
+                            .padding(.top, 24)
+                    }
+
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Search in 5 ways")
                             .font(.title3).fontWeight(.bold)
@@ -19,7 +26,7 @@ struct HomeView: View {
                             .padding(.top, 28)
                             .padding(.bottom, 6)
 
-                        NavigationLink(destination: BrowseClassesView(mode: .date)) {
+                        Button { selectedTab = 1 } label: {
                             SearchOptionContent(
                                 icon: "calendar.badge.clock",
                                 title: "Search by Date",
@@ -27,7 +34,7 @@ struct HomeView: View {
                                 color: Color(red: 0.62, green: 0.35, blue: 1.0)
                             )
                         }.buttonStyle(.plain)
-                        NavigationLink(destination: BrowseClassesView(mode: .style)) {
+                        Button { selectedTab = 1 } label: {
                             SearchOptionContent(
                                 icon: "figure.socialdance",
                                 title: "Search by Dance Style",
@@ -35,7 +42,7 @@ struct HomeView: View {
                                 color: .pink
                             )
                         }.buttonStyle(.plain)
-                        NavigationLink(destination: BrowseClassesView(mode: .level)) {
+                        Button { selectedTab = 1 } label: {
                             SearchOptionContent(
                                 icon: "chart.bar.fill",
                                 title: "Search by Level",
@@ -43,7 +50,7 @@ struct HomeView: View {
                                 color: .orange
                             )
                         }.buttonStyle(.plain)
-                        NavigationLink(destination: LocationClassView()) {
+                        Button { selectedTab = 1 } label: {
                             SearchOptionContent(
                                 icon: "mappin.circle.fill",
                                 title: "Search by Location",
@@ -159,6 +166,42 @@ struct HeroHeader: View {
         }
         .frame(maxWidth: .infinity)
         .frame(height: 290)
+    }
+}
+
+// MARK: - Create Profile Card
+
+struct CreateProfileCard: View {
+    let onSignIn: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "person.crop.circle.badge.plus")
+                    .font(.system(size: 26))
+                    .foregroundStyle(Color(red: 0.62, green: 0.35, blue: 1.0))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Create a profile")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text("Sign in to save classes and share with friends")
+                        .font(.subheadline)
+                        .foregroundStyle(Color(white: 0.55))
+                }
+            }
+            Button(action: onSignIn) {
+                Text("Sign In")
+                    .font(.subheadline).fontWeight(.semibold)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 11)
+                    .background(Color(red: 0.62, green: 0.35, blue: 1.0))
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+            }
+        }
+        .padding(16)
+        .background(Color(white: 0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
 
