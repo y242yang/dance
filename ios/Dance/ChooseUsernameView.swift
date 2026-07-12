@@ -32,16 +32,23 @@ struct ChooseUsernameView: View {
                     .foregroundStyle(kSecondary)
                     .multilineTextAlignment(.center)
 
-                TextField("username", text: $username)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .font(.title3)
-                    .foregroundStyle(.white)
-                    .padding(.vertical, 12)
-                    .padding(.horizontal, 16)
-                    .background(Color(white: 0.14))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    .padding(.horizontal, 40)
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField("username", text: $username)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.title3)
+                        .foregroundStyle(.white)
+                        .padding(.vertical, 12)
+                        .padding(.horizontal, 16)
+                        .background(Color(white: 0.14))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                    Text("One word, no spaces — like a handle")
+                        .font(.caption)
+                        .foregroundStyle(kSecondary)
+                        .padding(.horizontal, 4)
+                }
+                .padding(.horizontal, 40)
 
                 if let error {
                     Text(error).font(.caption).foregroundStyle(.red)

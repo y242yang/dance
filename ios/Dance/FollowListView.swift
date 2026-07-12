@@ -16,6 +16,12 @@ struct FollowListView: View {
     private struct ProfileRow: Decodable, Identifiable {
         let id: UUID
         let username: String
+        let avatarUrl: String?
+
+        enum CodingKeys: String, CodingKey {
+            case id, username
+            case avatarUrl = "avatar_url"
+        }
     }
 
     var body: some View {
@@ -32,8 +38,7 @@ struct FollowListView: View {
                         UserProfileView(userId: profile.id)
                     } label: {
                         HStack {
-                            Image(systemName: "person.crop.circle.fill")
-                                .font(.system(size: 30)).foregroundStyle(kAccent)
+                            avatarImage(for: profile)
                             Text("@\(profile.username)").foregroundStyle(.white)
                         }
                     }
@@ -49,6 +54,29 @@ struct FollowListView: View {
         .toolbarBackground(kBg, for: .navigationBar)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task { await load() }
+    }
+
+    @ViewBuilder
+    private func avatarImage(for profile: ProfileRow) -> some View {
+        Group {
+            if let urlString = profile.avatarUrl, let url = URL(string: urlString) {
+                AsyncImage(url: url) { phase in
+                    if let image = phase.image {
+                        image.resizable().scaledToFill()
+                    } else {
+                        Image(systemName: "person.crop.circle.fill")
+                            .resizable()
+                            .foregroundStyle(kAccent)
+                    }
+                }
+            } else {
+                Image(systemName: "person.crop.circle.fill")
+                    .resizable()
+                    .foregroundStyle(kAccent)
+            }
+        }
+        .frame(width: 30, height: 30)
+        .clipShape(Circle())
     }
 
     private func load() async {
@@ -80,7 +108,7 @@ struct FollowListView: View {
 
         profiles = (try? await supabase
             .from("profiles")
-            .select("id, username")
+            .select("id, username, avatar_url")
             .in("id", values: ids)
             .execute()
             .value) ?? []

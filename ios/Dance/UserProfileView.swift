@@ -16,6 +16,7 @@ struct UserProfileView: View {
     @Environment(SavedStore.self) private var savedStore
 
     @State private var username: String?
+    @State private var avatarUrl: String?
     @State private var followState: FollowState = .notFollowing
     @State private var followerCount = 0
     @State private var followingCount = 0
@@ -58,9 +59,25 @@ struct UserProfileView: View {
 
     private var header: some View {
         VStack(spacing: 8) {
-            Image(systemName: "person.crop.circle.fill")
-                .font(.system(size: 64))
-                .foregroundStyle(kAccent)
+            Group {
+                if let urlString = avatarUrl, let url = URL(string: urlString) {
+                    AsyncImage(url: url) { phase in
+                        if let image = phase.image {
+                            image.resizable().scaledToFill()
+                        } else {
+                            Image(systemName: "person.crop.circle.fill")
+                                .resizable()
+                                .foregroundStyle(kAccent)
+                        }
+                    }
+                } else {
+                    Image(systemName: "person.crop.circle.fill")
+                        .resizable()
+                        .foregroundStyle(kAccent)
+                }
+            }
+            .frame(width: 64, height: 64)
+            .clipShape(Circle())
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 24)
@@ -141,7 +158,7 @@ struct UserProfileView: View {
         }
 
         if !logEntries.isEmpty {
-            sectionHeader("Class Log")
+            sectionHeader("Committed Classes")
             VStack(spacing: 8) {
                 ForEach(logEntries) { entry in
                     LogEntryRow(entry: entry, isShared: savedStore.logEntries.contains { $0.isSameSession(as: entry) })
@@ -169,15 +186,18 @@ struct UserProfileView: View {
     private func loadAll() async {
         guard let myId = authStore.currentUserId else { return }
 
-        struct ProfileRow: Decodable { let username: String }
+        struct ProfileRow: Decodable { let username: String; let avatarUrl: String?
+            enum CodingKeys: String, CodingKey { case username; case avatarUrl = "avatar_url" }
+        }
         let profile: ProfileRow? = try? await supabase
             .from("profiles")
-            .select("username")
+            .select("username, avatar_url")
             .eq("id", value: userId)
             .single()
             .execute()
             .value
         username = profile?.username
+        avatarUrl = profile?.avatarUrl
 
         async let followers = countFollows(where: "following_id", equals: userId, status: "accepted")
         async let following = countFollows(where: "follower_id", equals: userId, status: "accepted")
