@@ -56,8 +56,10 @@ def delete_past_log_entries():
 def replace_future_classes(studio_id: str, classes: list[dict], covered_through: str):
     """Upsert by (deterministic) id so unchanged classes keep the same id across
     scrapes — clients that reference a class by id (e.g. saved/hearted classes)
-    aren't invalidated every time this runs. Classes no longer present (canceled
-    or removed) are deleted.
+    aren't invalidated every time this runs. Classes no longer present are deleted,
+    unless someone has the row saved (saved_classes) — those are soft-canceled
+    (is_canceled = true, row kept) instead, so a scraper miss can't silently cascade
+    away a user's heart. See sql/replace_future_classes.sql for the exact logic.
 
     `covered_through` (YYYY-MM-DD) is the furthest date this scrape actually reached.
     Deletion is scoped to [today, covered_through], so a run that only paginated part

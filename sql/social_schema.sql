@@ -184,3 +184,14 @@ CREATE TRIGGER classes_before_delete_mark_canceled
   BEFORE DELETE ON classes
   FOR EACH ROW
   EXECUTE FUNCTION mark_log_entries_canceled();
+
+-- Migration (2026-07-13): is_canceled on classes, for saved_classes soft-cancel.
+-- log_entries already survives a class row disappearing (ON DELETE SET NULL plus
+-- the is_canceled flag above), but saved_classes is a plain ON DELETE CASCADE with
+-- no denormalized fields of its own, so losing the classes row loses the heart
+-- outright with no trace. This flag lets replace_future_classes (see
+-- sql/replace_future_classes.sql) keep a class row in place and mark it canceled
+-- instead of deleting it, whenever the row is still referenced by saved_classes -
+-- covers both a genuine studio cancellation and a scraper miss that drops a class
+-- that should still be there.
+ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_canceled BOOLEAN NOT NULL DEFAULT FALSE;

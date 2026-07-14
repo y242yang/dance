@@ -604,6 +604,66 @@ def _fetch_healcode_widget(url: str, studio_id: str, days_ahead: int = 14) -> li
     return classes
 
 
+# Mindbody's day-tile widget repeats ~150 chars of identical nav chrome ("My
+# Account...Full Calendar...Today\n13\nTue\n14...") before every single day's content.
+# That's a quarter or more of the total captured text on a 14-day pull, and it's pure
+# noise for date extraction (the real date always comes from the explicit day header
+# right after it, e.g. "Monday, Jul 13") — so strip everything before that header out
+# of each day's capture. Cuts total text size and removes a likely source of Haiku
+# date-attribution errors on studios with many days of near-duplicate boilerplate.
+_DAY_HEADER_RE = re.compile(
+    r"(?:Sunday|Monday|Tuesday|Wednesday|Thursday|Friday|Saturday), "
+    r"(January|February|March|April|May|June|July|August|September|October|November|December|"
+    r"Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Oct|Nov|Dec) (\d{1,2})"
+)
+
+_MONTH_NUM = {
+    "January": 1, "Jan": 1, "February": 2, "Feb": 2, "March": 3, "Mar": 3,
+    "April": 4, "Apr": 4, "May": 5, "June": 6, "Jun": 6, "July": 7, "Jul": 7,
+    "August": 8, "Aug": 8, "September": 9, "Sep": 9, "October": 10, "Oct": 10,
+    "November": 11, "Nov": 11, "December": 12, "Dec": 12,
+}
+
+# Marker we inject ourselves at each day-tile capture, once we've deterministically
+# resolved its date from the page's own header via regex + arithmetic. Distinctive
+# enough (unlike free-form prose) that it can never appear by accident in any other
+# studio's scraped text, so splitting on it later is unambiguous and side-effect-free
+# for every other fetch path.
+_DAY_TAG_RE = re.compile(r"===CLASSDATE:(\d{4}-\d{2}-\d{2})===")
+
+
+def _resolve_header_date(month_name: str, day_num: int, today: date) -> date:
+    month = _MONTH_NUM[month_name]
+    year = today.year
+    candidate = date(year, month, day_num)
+    # A 14-day pull is always near "today" -- if the naive same-year date lands far in
+    # the past (e.g. scraping in late December for early January classes), it's really
+    # next year.
+    if candidate < today - timedelta(days=180):
+        candidate = date(year + 1, month, day_num)
+    return candidate
+
+
+def _strip_nav_boilerplate(text: str) -> str:
+    m = _DAY_HEADER_RE.search(text)
+    return text[m.start():] if m else text
+
+
+def _strip_and_tag_day(text: str, today: date) -> str:
+    """Strip the nav boilerplate (as _strip_nav_boilerplate does) and, since we're
+    already looking at the day header to do that, resolve its date ourselves and
+    prefix the result with an explicit ===CLASSDATE:YYYY-MM-DD=== marker. Downstream,
+    Haiku is never asked to compute/infer this date at all -- _parse_raw_by_day
+    splits on the marker and force-sets it on every class in that segment, so a
+    misread of the header text can no longer misattribute a day's classes to the
+    wrong date the way it did for On One Studio on 2026-07-12/13."""
+    m = _DAY_HEADER_RE.search(text)
+    if not m:
+        return text
+    resolved = _resolve_header_date(m.group(1), int(m.group(2)), today)
+    return f"===CLASSDATE:{resolved.isoformat()}===\n" + text[m.start():]
+
+
 def fetch_page_text(url: str, days_ahead: int = 1) -> str:
     if "my.eds.dance" in url:
         return ""  # EDS handled directly in _fetch_studio via _fetch_eds_classes
@@ -640,7 +700,7 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
 
             page.goto(url, wait_until="load", timeout=30000)
             page.wait_for_timeout(1500)
-            all_text = get_all_frames_text(page)
+            all_text = _strip_nav_boilerplate(get_all_frames_text(page))
 
             # for Wix sites: use the API directly to get additional weeks
             if wix_auth[0] and days_ahead > 1:
@@ -674,7 +734,11 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
                 day_tiles = [b for b in all_btns
                              if (b.get_attribute("aria-label") or "").lower() not in nav_labels]
                 if first_week:
-                    # first tile is already selected; skip it
+                    # first tile is already selected; skip it. Now that we know for
+                    # certain this studio uses the Mindbody day-tile widget, retag the
+                    # day-1 content captured before the loop with its own resolved-date
+                    # marker too, for consistency with every day captured below.
+                    all_text = _strip_and_tag_day(all_text, date.today())
                     day_tiles = list(day_tiles)[1:]
                     first_week = False
 
@@ -685,7 +749,7 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
                         try:
                             tile.click(force=True)
                             page.wait_for_timeout(700)
-                            day_text = get_all_frames_text(page)
+                            day_text = _strip_and_tag_day(get_all_frames_text(page), date.today())
                             print(f"  → day {days_collected + 1}: {len(day_text)} chars")
                             all_text += "\n" + day_text
                             days_collected += 1
@@ -834,6 +898,40 @@ def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
     return result
 
 
+def _parse_raw_by_day(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
+    """Like _parse_raw, but for text carrying our own ===CLASSDATE:YYYY-MM-DD===
+    markers (see _strip_and_tag_day) -- splits on those markers first and parses each
+    day in isolation, then force-sets the date on every class in that segment to the
+    marker's value, ignoring whatever Haiku returns for "date" entirely. Removes date
+    attribution as something the model can get wrong, rather than just reducing the
+    odds of it (the boilerplate strip alone did the latter, which caught neither of
+    the two On One Studio incidents on 2026-07-12/13 -- one dropped a day, the other
+    misattributed one day's classes onto a different day).
+
+    Falls back to plain _parse_raw unchanged when no markers are present (every other
+    fetch path -- Acuity, Linktree, Rae, Wix -- never produces this marker, so this is
+    a no-op there)."""
+    marker_positions = list(_DAY_TAG_RE.finditer(page_text))
+    if not marker_positions:
+        return _parse_raw(page_text, studio_id, studio_name)
+
+    result = []
+    # Any text before the first marker (should be empty in practice) has no resolved
+    # date to force -- parse it the old way rather than silently drop it.
+    if page_text[:marker_positions[0].start()].strip():
+        result.extend(_parse_raw(page_text[:marker_positions[0].start()], studio_id, studio_name))
+
+    for i, m in enumerate(marker_positions):
+        seg_start = m.end()
+        seg_end = marker_positions[i + 1].start() if i + 1 < len(marker_positions) else len(page_text)
+        day_classes = _parse_raw(page_text[seg_start:seg_end], studio_id, studio_name)
+        resolved_date = m.group(1)
+        for c in day_classes:
+            c["date"] = resolved_date
+        result.extend(day_classes)
+    return result
+
+
 _DAYS_AHEAD = 14
 
 def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
@@ -921,7 +1019,7 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
             # A working schedule page always has text; empty means the fetch failed.
             _report([], None)
             return sid, [], None
-        classes = _parse_raw(all_text, sid, name)
+        classes = _parse_raw_by_day(all_text, sid, name)
         classes = [c for c in classes if today_str <= (c.get("date") or "") <= cutoff]
         classes = _apply_exclude(classes)
         # Coverage watermark = furthest date we actually parsed. Empty parse → None
