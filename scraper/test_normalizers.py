@@ -15,6 +15,7 @@ test runs with only the standard library installed.
 import sys
 import types
 import unittest
+from unittest.mock import patch
 
 
 def _stub(name):
@@ -167,6 +168,38 @@ class TestNormalizeStyle(unittest.TestCase):
         self.assertEqual(scraper._normalize_style(None, title="Krumping Session"), "Krump")
         self.assertEqual(scraper._normalize_style(None, title="Waacking Fundamentals"), "Waacking")
 
+    def test_groove_from_title(self):
+        self.assertEqual(scraper._normalize_style(None, title="BEG/INT Grooves (Ages 13+)"), "Groove")
+        self.assertEqual(scraper._normalize_style(None, title="Groove Session"), "Groove")
+        # word boundary: "groovy" is not "groove"
+        self.assertEqual(scraper._normalize_style(None, title="Groovy Vibes"), "Choreography")
+
+    def test_groove_from_title_only_when_raw_unresolved(self):
+        # raw is checked first: a raw value that itself matches nothing (the
+        # "Choreography" fallback, or empty) falls through to the title, where an
+        # explicit "Grooves" is picked up.
+        self.assertEqual(scraper._normalize_style("Choreography", title="BEG/INT Grooves (Ages 13+)"), "Groove")
+        self.assertEqual(scraper._normalize_style(None, title="INT/ADV Grooves (Ages 13+)"), "Groove")
+
+    def test_raw_wins_over_title_groove_when_raw_is_a_real_style(self):
+        # raw takes priority over any title/description clue, including "grooves",
+        # when raw itself already matches a real style -- raw is informed by the
+        # full page context, so it's trusted over a bare title keyword. (This is why
+        # "Groove" was added as a real choice in the Haiku PROMPT: the fix for an
+        # inconsistent raw guess belongs at the source, not in a title override that
+        # would also demote a *correct* raw classification for every other style.)
+        self.assertEqual(scraper._normalize_style("Jazz Funk", title="INT/ADV Grooves (Ages 13+)"), "Jazz Funk")
+        self.assertEqual(scraper._normalize_style("House", title="House & Hip-Hop Grooves"), "House")
+        self.assertEqual(scraper._normalize_style("Hip Hop", title="Foundations: Grooves"), "Hip Hop")
+
+    def test_title_groove_still_applies_when_raw_generic(self):
+        # A class that's more specifically Hip Hop/House and also says "grooves"
+        # keeps the more specific label when title is consulted -- Groove is the
+        # last resort within the pattern list, not an override.
+        self.assertEqual(scraper._normalize_style(None, title="House & Hip-Hop Grooves"), "Hip Hop")
+        self.assertEqual(scraper._normalize_style(None, title="All Levels House Grooves"), "House")
+        self.assertEqual(scraper._normalize_style(None, title="Foundations: Grooves"), "Groove")
+
 
 class TestNormalizeDuration(unittest.TestCase):
     def test_valid_range(self):
@@ -209,6 +242,148 @@ class TestStableClassId(unittest.TestCase):
             scraper._stable_class_id("studio-a", base),
             scraper._stable_class_id("studio-b", base),
         )
+
+    def test_different_locations_get_different_ids(self):
+        # Regression guard: _parse_raw_by_day's dedup (_add_deduped) deliberately
+        # keeps two locations' identically-timed/titled classes as distinct rows
+        # (see TestParseRawByDay.test_different_locations_are_not_deduped_together).
+        # If _stable_class_id ignored location, both would hash to the same DB id
+        # and the upsert would crash with "ON CONFLICT DO UPDATE command cannot
+        # affect row a second time" for a real multi-location collision, not just
+        # the stale-tiles-race duplicate this feature was built to fix.
+        base = {"title": "Open Level Hip Hop", "date": "2026-07-13", "start_time": "18:00:00"}
+        fremont = scraper._stable_class_id("s", dict(base, _loc_city="Fremont"))
+        cupertino = scraper._stable_class_id("s", dict(base, _loc_city="Cupertino"))
+        self.assertNotEqual(fremont, cupertino)
+
+    def test_no_location_matches_id_without_location_field(self):
+        # Backward compatibility: a class dict with no _loc_city at all (the vast
+        # majority -- single-location studios never populate this field) must hash
+        # to the exact same id it always has, so existing "saved"/hearted class
+        # references aren't invalidated by adding location to the identity key.
+        base = {"title": "Heels 101", "date": "2026-07-10", "start_time": "19:00:00"}
+        without_field = scraper._stable_class_id("s", base)
+        with_none = scraper._stable_class_id("s", dict(base, _loc_city=None))
+        with_empty = scraper._stable_class_id("s", dict(base, _loc_city=""))
+        self.assertEqual(without_field, with_none)
+        self.assertEqual(without_field, with_empty)
+
+    def test_location_case_and_whitespace_insensitive(self):
+        base = {"title": "Heels 101", "date": "2026-07-10", "start_time": "19:00:00"}
+        a = scraper._stable_class_id("s", dict(base, _loc_city="San Jose"))
+        b = scraper._stable_class_id("s", dict(base, _loc_city="  san jose "))
+        self.assertEqual(a, b)
+
+
+class TestInjectLocationHint(unittest.TestCase):
+    """Regression coverage for a real bug: the location hint used to be prepended
+    as a plain prefix before a url's whole marker-tagged text, which _parse_raw_by_day
+    then sliced into the TAIL of the PRECEDING location's last-day segment instead of
+    into this location's own days (segments run from one marker's end to the next
+    marker's start). _inject_location_hint fixes this by inserting the hint right
+    after each marker instead of before the whole block."""
+
+    def test_hint_lands_in_first_days_own_segment_not_before_it(self):
+        t = "===CLASSDATE:2026-07-13===\nseg one\n===CLASSDATE:2026-07-14===\nseg two"
+        tagged = scraper._inject_location_hint(t, "Fremont")
+        markers = list(scraper._DAY_TAG_RE.finditer(tagged))
+        self.assertEqual(len(markers), 2)
+        first_segment = tagged[markers[0].end():markers[1].start()]
+        self.assertIn("[Location: Fremont, CA]", first_segment)
+        self.assertIn("seg one", first_segment)
+
+    def test_multi_location_concatenation_keeps_hints_with_their_own_city(self):
+        # Simulates _fetch_studio concatenating two locations' texts together --
+        # each location's own day segment must carry its own hint, and only its own.
+        t1 = scraper._inject_location_hint("===CLASSDATE:2026-07-13===\nFremont day", "Fremont")
+        t2 = scraper._inject_location_hint("===CLASSDATE:2026-07-13===\nCupertino day", "Cupertino")
+        all_text = "\n\n" + t1 + "\n\n" + t2
+        markers = list(scraper._DAY_TAG_RE.finditer(all_text))
+        self.assertEqual(len(markers), 2)
+        seg0 = all_text[markers[0].end():markers[1].start()]
+        seg1 = all_text[markers[1].end():]
+        self.assertIn("[Location: Fremont, CA]", seg0)
+        self.assertNotIn("Cupertino", seg0)
+        self.assertIn("[Location: Cupertino, CA]", seg1)
+        self.assertNotIn("Fremont", seg1)
+
+    def test_no_markers_falls_back_to_prefix(self):
+        t = "no markers here, just plain schedule text"
+        tagged = scraper._inject_location_hint(t, "Fremont")
+        self.assertEqual(tagged, "[Location: Fremont, CA]\nno markers here, just plain schedule text")
+
+
+class TestParseRawByDay(unittest.TestCase):
+    """_parse_raw_by_day and its _add_deduped dedup have caused two real production
+    bugs this session (a dropped day, and an ON CONFLICT DO UPDATE crash from a
+    duplicate day-capture) and previously shipped with zero test coverage. _parse_raw
+    itself makes a real Claude Haiku API call, so these mock it out and test the
+    marker-splitting / date-forcing / dedup logic in isolation."""
+
+    def test_splits_by_marker_and_forces_date_ignoring_parsed_date(self):
+        page_text = (
+            "===CLASSDATE:2026-07-13===\nseg one\n"
+            "===CLASSDATE:2026-07-14===\nseg two"
+        )
+        # Haiku's own "date" field (here deliberately wrong) must be overridden by
+        # the marker's date, not trusted.
+        with patch.object(scraper, "_parse_raw", side_effect=[
+            [{"date": "1999-01-01", "start_time": "18:00:00", "title": "Class A"}],
+            [{"date": "1999-01-01", "start_time": "19:00:00", "title": "Class B"}],
+        ]):
+            result = scraper._parse_raw_by_day(page_text, "studio-1", "Test Studio")
+        self.assertEqual(sorted(c["date"] for c in result), ["2026-07-13", "2026-07-14"])
+        self.assertEqual({c["title"] for c in result}, {"Class A", "Class B"})
+
+    def test_dedups_a_repeated_day_capture(self):
+        # Same marker date appearing twice simulates the stale-tiles race
+        # re-capturing the same calendar week -- both segments parse to the
+        # identical class.
+        page_text = (
+            "===CLASSDATE:2026-07-13===\nseg one\n"
+            "===CLASSDATE:2026-07-13===\nseg one again"
+        )
+        same_class = {"date": "1999-01-01", "start_time": "18:00:00", "title": "Class A"}
+        with patch.object(scraper, "_parse_raw", side_effect=[[dict(same_class)], [dict(same_class)]]):
+            result = scraper._parse_raw_by_day(page_text, "studio-1", "Test Studio")
+        self.assertEqual(len(result), 1)
+
+    def test_dedup_is_case_and_whitespace_insensitive_like_stable_class_id(self):
+        # Regression guard: the dedup key must match _stable_class_id's own
+        # normalization (via the shared _class_identity_key), or a title differing
+        # only by case/whitespace could pass dedup as "different" and then collide
+        # once _stable_class_id normalizes it for the DB upsert.
+        page_text = (
+            "===CLASSDATE:2026-07-13===\nseg one\n"
+            "===CLASSDATE:2026-07-13===\nseg one again"
+        )
+        with patch.object(scraper, "_parse_raw", side_effect=[
+            [{"date": "x", "start_time": "18:00:00", "title": "Class A"}],
+            [{"date": "x", "start_time": "18:00:00", "title": "  class a  "}],
+        ]):
+            result = scraper._parse_raw_by_day(page_text, "studio-1", "Test Studio")
+        self.assertEqual(len(result), 1)
+
+    def test_different_locations_are_not_deduped_together(self):
+        # Same date/time/title at two different locations of a multi-location
+        # studio are genuinely different classes -- must not collapse into one.
+        page_text = (
+            "===CLASSDATE:2026-07-13===\nseg one\n"
+            "===CLASSDATE:2026-07-13===\nseg two"
+        )
+        with patch.object(scraper, "_parse_raw", side_effect=[
+            [{"date": "x", "start_time": "18:00:00", "title": "Class A", "_loc_city": "Fremont"}],
+            [{"date": "x", "start_time": "18:00:00", "title": "Class A", "_loc_city": "Cupertino"}],
+        ]):
+            result = scraper._parse_raw_by_day(page_text, "studio-1", "Test Studio")
+        self.assertEqual(len(result), 2)
+
+    def test_no_markers_falls_back_to_plain_parse_raw(self):
+        page_text = "no markers in this text at all"
+        with patch.object(scraper, "_parse_raw", return_value=[{"title": "Class A"}]) as mock_parse:
+            result = scraper._parse_raw_by_day(page_text, "studio-1", "Test Studio")
+        mock_parse.assert_called_once_with(page_text, "studio-1", "Test Studio")
+        self.assertEqual(result, [{"title": "Class A"}])
 
 
 class TestMaxClassDate(unittest.TestCase):

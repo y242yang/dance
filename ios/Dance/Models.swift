@@ -61,6 +61,7 @@ struct DanceClass: Codable, Identifiable, Hashable {
         if style.contains("turfing") { return Color(red: 0.30, green: 0.45, blue: 0.85) }
         if style.contains("chinese") { return Color(red: 0.80, green: 0.20, blue: 0.25) }
         if style.contains("pro dance") { return Color(red: 0.50, green: 0.50, blue: 0.55) }
+        if style.contains("groove") { return Color(red: 0.30, green: 0.65, blue: 0.35) }
         if style.contains("choreography") { return Color(red: 0.45, green: 0.40, blue: 0.75) }
         return .indigo
     }

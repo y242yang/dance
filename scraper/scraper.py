@@ -16,8 +16,42 @@ from db import get_or_create_location, replace_future_classes, get_default_locat
 # a class by id without it being invalidated by the next day's re-scrape.
 _CLASS_ID_NAMESPACE = uuid.UUID("7d6f5b0a-6b7e-4b8a-9b0a-6b7e4b8a9b0a")
 
+def _class_identity_key(c: dict) -> tuple:
+    """Canonical (date, start_time, normalized title, normalized location) identity
+    for a class dict -- single source of truth for "is this the same class", shared
+    by _stable_class_id (the DB's actual uniqueness key) and every in-memory dedup
+    pass over parsed classes. Previously each dedup pass hand-rolled its own slightly
+    different normalization (one truncated title to 30 chars without lowering it,
+    another lowered/stripped the full title, another bolted a raw un-normalized
+    location onto the end) -- close enough to usually agree, but a title differing
+    only by case or only past character 30, or a location differing only by case,
+    could pass one of those checks as "different" and then collide once
+    _stable_class_id normalized its own key, reproducing an ON CONFLICT DO UPDATE
+    upsert crash through a path no dedup was actually guarding. Routing every one of
+    these through this single function means they can't drift out of sync with each
+    other or with what actually determines an upsert collision."""
+    return (
+        c.get("date"),
+        c.get("start_time"),
+        (c.get("title") or "").strip().lower(),
+        (c.get("_loc_city") or "").strip().lower(),
+    )
+
+
 def _stable_class_id(studio_id: str, c: dict) -> str:
-    key = f"{studio_id}|{(c.get('title') or '').strip().lower()}|{c.get('date')}|{c.get('start_time')}"
+    cls_date, start_time, title, loc_city = _class_identity_key(c)
+    key = f"{studio_id}|{title}|{cls_date}|{start_time}"
+    # Only fold location into the id when one was actually resolved, so studios that
+    # never populate _loc_city (the vast majority -- single-location studios) keep
+    # hashing to the exact same id they always have, and existing "saved"/hearted
+    # class references for them aren't invalidated by this change. Multi-location
+    # studios where two branches genuinely offer the same title at the same time
+    # need it, or both classes hash to one id and the upsert crashes with "ON
+    # CONFLICT DO UPDATE command cannot affect row a second time" -- the identity
+    # key must fold in every input _add_deduped uses to tell two classes apart, since
+    # it is meant to be the same "is this the same class" answer as the in-memory dedup.
+    if loc_city:
+        key += f"|{loc_city}"
     return str(uuid.uuid5(_CLASS_ID_NAMESPACE, key))
 
 _default_location_cache = {}  # studio_id -> Optional[str]
@@ -26,6 +60,12 @@ _default_location_cache = {}  # studio_id -> Optional[str]
 # only a runaway guard — the real stop condition is reaching the days-ahead cutoff date
 # (or running out of Next buttons). Set high enough that 14 days is never truncated.
 _PAGINATION_MAX_CLICKS = 25
+
+# Mindbody day-tile widgets use div[role="button"] for both actual day tiles and the
+# Previous/Next/Open-calendar controls; this excludes the latter by aria-label. Shared
+# by every place in fetch_page_text that collects or fingerprints day tiles so they
+# can't drift out of sync with each other.
+_NAV_LABELS = {"next", "previous", "open calendar"}
 
 # Created lazily on first use so the module can be imported (e.g. by unit tests that
 # only exercise the pure normalizer functions) without an ANTHROPIC_API_KEY set.
@@ -54,6 +94,7 @@ _VALID_STYLES = {
     "Salsa", "Reggaeton", "Dancehall", "Breaking", "House", "Vogue", "Turfing",
     "Jazz", "Chinese", "Chinese Fusion", "Pro Dance", "Choreography",
     "Locking", "Latin", "Popping", "Afro", "Twerk", "Krump", "Waacking", "Bachata",
+    "Groove",
 }
 
 # Ordered (priority) patterns → canonical style; first match wins. Each is matched with
@@ -90,6 +131,12 @@ _STYLE_PATTERNS = [
     (r"bachata", "Bachata"),  # before "latin": Bachata is a Latin genre but its own style
     (r"latin", "Latin"),
     (r"jazz", "Jazz"),
+    # Last resort before the generic "Choreography" default -- a "Groove(s)"-titled
+    # class with no other, more specific style keyword lands here rather than
+    # Choreography. Deliberately last: a class that's more specifically Hip Hop,
+    # House, Jazz Funk, etc. and also happens to say "grooves" should keep that more
+    # specific label, not get bucketed into Groove.
+    (r"grooves?", "Groove"),
 ]
 
 def _normalize_level(raw, title: str = "", description: str = "") -> str:
@@ -143,8 +190,28 @@ def _match_style(text: str) -> "str | None":
 
 def _normalize_style(raw, title: str = "", description: str = "") -> str:
     combined = " ".join(filter(None, [title, description]))
-    # 1. Classify normally: trust Haiku's own dance_style label first, then fall back to
-    #    clues in the title/description, then the generic "Choreography" default.
+    # 1. Classify normally: trust Haiku's own dance_style label first -- raw is
+    #    informed by the full page context (not just this class's own title/
+    #    description), so it's usually the more reliable signal -- falling back to
+    #    clues in the title/description only when raw didn't match a real style,
+    #    then the generic "Choreography" default.
+    #    An earlier version of this function checked title/description BEFORE raw,
+    #    specifically to make "Grooves"-titled classes land on "Groove" reliably
+    #    instead of whatever genre Haiku had to force-guess before "Groove" was a
+    #    real option. That was reverted: checking title first is a global change
+    #    that lets ANY incidental keyword in the title/description outrank a
+    #    correct, more-informed raw classification, for every style, not just
+    #    Groove -- e.g. a class raw="Waacking" (correct) whose description happens
+    #    to mention "hip hop" would get relabeled "Hip Hop", since patterns are
+    #    matched by list position, not by relevance to the actual class. The right
+    #    fix for Groove specifically is at the source: "Groove" is now one of
+    #    Haiku's own choices (see PROMPT below), so raw should increasingly say
+    #    "Groove" directly for these classes without needing title to override raw
+    #    at all. Patterns within _match_style are still ordered by specificity
+    #    (Hip Hop, Jazz Funk, House, etc. all precede the catch-all "grooves?"
+    #    pattern), so when raw doesn't resolve to anything and title is checked as
+    #    the fallback, a class that's more specifically one of those and also
+    #    happens to say "grooves" still keeps that more specific label, not Groove.
     style = _match_style(str(raw or "")) or _match_style(combined) or "Choreography"
     # 2. Apply overrides LAST, so the final rewrite wins over the base classification.
     #    Heels classes are frequently themed around another genre or prop (e.g. "Reggaeton
@@ -166,7 +233,7 @@ PROMPT = """You are extracting dance class schedule data from a studio website.
 
 Extract every class listed and return a JSON array. Each class object must have:
 - title: class name (string)
-- dance_style: use these exact labels only — "Hip Hop", "Heels", "Jazz Funk", "K-pop", "Contemporary", "Ballet", "Salsa", "Reggaeton", "Dancehall", "Breaking", "House", "Vogue", "Turfing", "Jazz", "Chinese", "Chinese Fusion", "Pro Dance", "Popping", "Afro", "Twerk", "Krump", "Waacking", "Bachata", "Locking", "Latin", "Choreography". Pick the closest match — Dancehall and Reggaeton are different genres, don't conflate them. Chair- and floorwork-themed classes should be labeled "Heels", not a separate style. Use "Choreography" as the fallback if none fit. (string or null)
+- dance_style: use these exact labels only — "Hip Hop", "Heels", "Jazz Funk", "K-pop", "Contemporary", "Ballet", "Salsa", "Reggaeton", "Dancehall", "Breaking", "House", "Vogue", "Turfing", "Jazz", "Chinese", "Chinese Fusion", "Pro Dance", "Popping", "Afro", "Twerk", "Krump", "Waacking", "Bachata", "Locking", "Latin", "Groove", "Choreography". Pick the closest match — Dancehall and Reggaeton are different genres, don't conflate them. Chair- and floorwork-themed classes should be labeled "Heels", not a separate style. A "Groove(s)"-titled class with no other, more specific style should be labeled "Groove", not "Choreography". Use "Choreography" as the fallback only if nothing else, including "Groove", fits. (string or null)
 - instructor: teacher name (string or null)
 - level: one of "beginner", "intermediate", "advanced", "begin/int", "int/adv", "all_levels" (string). Rules:
     * Check the level field first, then look for clues in the class title and description.
@@ -725,20 +792,44 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
 
             days_collected = 1
             first_week = True
+            prev_day_text = all_text
+
+            # Mindbody widgets use div[role="button"] for day tiles and for the
+            # Previous/Next/Open-calendar controls alike; excluded by aria-label so
+            # only actual day tiles remain. Defined once (not re-built per iteration
+            # or duplicated between the day-tile collection and the signature check
+            # below) so the two can never drift out of sync with each other.
+            def _day_tile_signature():
+                # Falls back to iframes like the "Next" button lookup below does --
+                # a widget whose Next button lives in an iframe has its day tiles
+                # there too, and a main-page-only query would return "" before and
+                # after every click, always reporting (falsely) that nothing changed.
+                sig = []
+                for frame in [page] + list(page.frames):
+                    try:
+                        btns = frame.query_selector_all('[role="button"]')
+                    except Exception:
+                        continue
+                    for b in btns:
+                        if (b.get_attribute("aria-label") or "").lower() in _NAV_LABELS:
+                            continue
+                        try:
+                            sig.append(b.inner_text().strip())
+                        except Exception:
+                            pass
+                return "|".join(sig)
 
             while days_collected < days_ahead:
-                # Mindbody widgets use div[role="button"] for day tiles
-                # Exclude navigation buttons (Previous, Next, Open calendar)
-                nav_labels = {"next", "previous", "open calendar"}
                 all_btns = page.query_selector_all('[role="button"]')
                 day_tiles = [b for b in all_btns
-                             if (b.get_attribute("aria-label") or "").lower() not in nav_labels]
+                             if (b.get_attribute("aria-label") or "").lower() not in _NAV_LABELS]
                 if first_week:
                     # first tile is already selected; skip it. Now that we know for
                     # certain this studio uses the Mindbody day-tile widget, retag the
                     # day-1 content captured before the loop with its own resolved-date
                     # marker too, for consistency with every day captured below.
                     all_text = _strip_and_tag_day(all_text, date.today())
+                    prev_day_text = all_text
                     day_tiles = list(day_tiles)[1:]
                     first_week = False
 
@@ -750,11 +841,35 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
                             tile.click(force=True)
                             page.wait_for_timeout(700)
                             day_text = _strip_and_tag_day(get_all_frames_text(page), date.today())
+                            # Verify the tile click actually swapped in a new day
+                            # instead of trusting the fixed wait -- this is the same
+                            # stale-DOM race the Next-button check below guards
+                            # against, just on the more frequently exercised path
+                            # (every tile in every week, not just once per week), so
+                            # leaving it unguarded here left the biggest source of
+                            # the duplicate-day-capture race for _add_deduped to
+                            # silently clean up after rather than catch at the source.
+                            for _ in range(3):
+                                if day_text != prev_day_text:
+                                    break
+                                page.wait_for_timeout(350)
+                                day_text = _strip_and_tag_day(get_all_frames_text(page), date.today())
+                            else:
+                                print(f"  → WARNING: day content unchanged after tile click "
+                                      f"(possible stale-tile race) at day {days_collected + 1}, proceeding anyway")
                             print(f"  → day {days_collected + 1}: {len(day_text)} chars")
                             all_text += "\n" + day_text
                             days_collected += 1
-                        except Exception:
-                            pass
+                            prev_day_text = day_text
+                        except Exception as e:
+                            # A stale ElementHandle (the same class of race the Next-click
+                            # wait below guards against) raises here instead of silently
+                            # re-rendering old content -- that means this day is skipped
+                            # outright, not duplicated, which _parse_raw_by_day's dedup
+                            # can't detect or repair (nothing to drop, just a hole). Log it
+                            # so a dropped day is visible instead of indistinguishable from
+                            # a day that genuinely has no classes.
+                            print(f"  → day tile click failed (day {days_collected + 1} of {days_ahead}): {e}")
 
                     if days_collected >= days_ahead:
                         break
@@ -817,8 +932,29 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
                 if not next_btn:
                     print(f"  → no Next button, stopping at day {days_collected}")
                     break
+
+                # Verify the week actually advanced instead of trusting a fixed wait.
+                # A stale day-tile signature after this click is the suspected root
+                # cause of the duplicate-day-capture bug that _parse_raw_by_day's
+                # dedup (_add_deduped / _class_identity_key) exists to clean up after
+                # the fact -- catching it here instead avoids the wasted re-click,
+                # re-render, and duplicate per-day Haiku calls that downstream dedup
+                # alone can't prevent, only mask.
+                before_signature = _day_tile_signature()
                 next_btn.click(force=True)
-                page.wait_for_timeout(800)
+                for _ in range(5):
+                    page.wait_for_timeout(400)
+                    if _day_tile_signature() != before_signature:
+                        # Tiles can re-render progressively (e.g. a selection
+                        # highlight updates before the date labels do) -- one more
+                        # short wait so a signature change caught mid-transition
+                        # doesn't send the day-tile loop after tiles that haven't
+                        # finished settling yet.
+                        page.wait_for_timeout(250)
+                        break
+                else:
+                    print(f"  → WARNING: day tiles unchanged after clicking Next "
+                          f"(possible stale-tiles race) at day {days_collected}, proceeding anyway")
 
             return all_text
         finally:
@@ -849,7 +985,7 @@ def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
                 continue
             try:
                 for c in _parse_raw(chunk, studio_id, studio_name):
-                    key = (c.get("date"), c.get("start_time"), c.get("title", "")[:30])
+                    key = _class_identity_key(c)
                     if key not in seen:
                         seen.add(key)
                         result.append(c)
@@ -898,6 +1034,29 @@ def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
     return result
 
 
+def _inject_location_hint(t: str, city_hint: str) -> str:
+    """Tag one schedule_url's fetched text with its resolved city so Haiku assigns
+    the right location_city, in a way that survives _parse_raw_by_day's marker-based
+    splitting once _fetch_studio concatenates every location's text together.
+
+    _parse_raw_by_day splits the full concatenated blob on ===CLASSDATE=== markers
+    into per-day segments running from one marker's end to the next marker's start.
+    A hint placed as a plain prefix BEFORE this url's own markers would fall in that
+    gap and get sliced into the TAIL of the PRECEDING url's last-day segment instead
+    of into this url's own days -- every location but the first would then parse
+    with no hint at all, and the location before it would parse with the wrong one.
+    Inserting the hint right after each marker instead keeps it inside this url's
+    own per-day segments, however many locations get concatenated in whatever order.
+
+    Falls back to a plain prefix when `t` has no markers at all (single-day fetch,
+    or a fetch path that never tags days) -- there's no splitting to survive, so a
+    prefix is safe and there's nothing to insert after."""
+    tag_line = f"[Location: {city_hint}, CA]\n"
+    if _DAY_TAG_RE.search(t):
+        return _DAY_TAG_RE.sub(lambda m: m.group(0) + "\n" + tag_line, t)
+    return tag_line + t
+
+
 def _parse_raw_by_day(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
     """Like _parse_raw, but for text carrying our own ===CLASSDATE:YYYY-MM-DD===
     markers (see _strip_and_tag_day) -- splits on those markers first and parses each
@@ -910,16 +1069,50 @@ def _parse_raw_by_day(page_text: str, studio_id: str, studio_name: str) -> list[
 
     Falls back to plain _parse_raw unchanged when no markers are present (every other
     fetch path -- Acuity, Linktree, Rae, Wix -- never produces this marker, so this is
-    a no-op there)."""
+    a no-op there).
+
+    Deduped by _class_identity_key (date, start_time, normalized title, normalized
+    location): if the day-tile pagination loop ever re-captures the same calendar
+    day twice (e.g. a stale-tiles race right after clicking "Next" to advance a
+    week, before the new week has finished rendering), that day now gets two
+    markers and gets parsed twice. Concatenating everything into one Haiku call
+    used to silently absorb that kind of exact duplication; doing per-day calls no
+    longer does, so two classes can come out with an identical id and break the ON
+    CONFLICT DO UPDATE upsert (a real failure hit on Young Reach Dance Studio on
+    2026-07-15: "ON CONFLICT DO UPDATE command cannot affect row a second time").
+    Dropping the repeat here, at the same identity _stable_class_id already uses
+    for uniqueness (see _class_identity_key), is a direct fix regardless of what
+    causes the re-capture.
+
+    _class_identity_key's location component is what keeps two different locations'
+    classes from colliding here: _fetch_studio concatenates every one of a
+    multi-location studio's schedule_urls into a single all_text blob before the one
+    _parse_raw_by_day call that applies this dedup -- without a location component,
+    two different locations legitimately offering the same class at the same time
+    would look like one location's class captured twice, and the second would be
+    silently (if logged) discarded as a false duplicate instead of kept as the
+    distinct class it is."""
     marker_positions = list(_DAY_TAG_RE.finditer(page_text))
     if not marker_positions:
         return _parse_raw(page_text, studio_id, studio_name)
 
+    seen: set[tuple] = set()
     result = []
+
+    def _add_deduped(classes):
+        for c in classes:
+            key = _class_identity_key(c)
+            if key in seen:
+                print(f"  → dropped duplicate day-capture: {c.get('date')} {c.get('start_time')} "
+                      f"{c.get('title')!r} ({c.get('_loc_city') or 'no location'})")
+                continue
+            seen.add(key)
+            result.append(c)
+
     # Any text before the first marker (should be empty in practice) has no resolved
     # date to force -- parse it the old way rather than silently drop it.
     if page_text[:marker_positions[0].start()].strip():
-        result.extend(_parse_raw(page_text[:marker_positions[0].start()], studio_id, studio_name))
+        _add_deduped(_parse_raw(page_text[:marker_positions[0].start()], studio_id, studio_name))
 
     for i, m in enumerate(marker_positions):
         seg_start = m.end()
@@ -928,7 +1121,7 @@ def _parse_raw_by_day(page_text: str, studio_id: str, studio_name: str) -> list[
         resolved_date = m.group(1)
         for c in day_classes:
             c["date"] = resolved_date
-        result.extend(day_classes)
+        _add_deduped(day_classes)
     return result
 
 
@@ -1011,7 +1204,7 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
             path_seg = _urlparse(url).path.lower().strip("/").split("/")[-1]
             if "calendar-" in path_seg:
                 city_hint = path_seg.replace("calendar-", "").replace("-", " ").title()
-                all_text += f"\n\n[Location: {city_hint}, CA]\n" + t
+                all_text += "\n\n" + _inject_location_hint(t, city_hint)
             else:
                 all_text += "\n\n" + t
         all_text = all_text.strip()
