@@ -1000,7 +1000,14 @@ def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
         max_tokens=8192,
         messages=[{
             "role": "user",
-            "content": PROMPT.format(today=today, year=year) + "\n\n" + page_text
+            "content": [
+                {
+                    "type": "text",
+                    "text": PROMPT.format(today=today, year=year),
+                    "cache_control": {"type": "ephemeral"},
+                },
+                {"type": "text", "text": page_text},
+            ],
         }]
     )
     raw = message.content[0].text.strip()
@@ -1125,7 +1132,7 @@ def _parse_raw_by_day(page_text: str, studio_id: str, studio_name: str) -> list[
     return result
 
 
-_DAYS_AHEAD = 14
+_DAYS_AHEAD = 10
 
 def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
     """Phase 1 (parallel): fetch pages + parse + normalize. No DB calls.
