@@ -87,7 +87,7 @@ final class DanceViewModel {
             let fmt = DateFormatter()
             fmt.dateFormat = "yyyy-MM-dd"
             let today = fmt.string(from: Date())
-            let cutoff = fmt.string(from: Calendar.current.date(byAdding: .day, value: 14, to: Date())!)
+            let cutoff = fmt.string(from: Calendar.current.date(byAdding: .day, value: scheduleDaysAhead, to: Date())!)
 
             classes = try await supabase
                 .from("classes")

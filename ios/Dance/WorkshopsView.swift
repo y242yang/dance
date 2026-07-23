@@ -52,7 +52,7 @@ final class WorkshopsViewModel {
             let fmt = DateFormatter()
             fmt.dateFormat = "yyyy-MM-dd"
             let today = fmt.string(from: Date())
-            let cutoff = fmt.string(from: Calendar.current.date(byAdding: .day, value: 14, to: Date())!)
+            let cutoff = fmt.string(from: Calendar.current.date(byAdding: .day, value: scheduleDaysAhead, to: Date())!)
 
             classes = try await supabase
                 .from("classes")
@@ -100,7 +100,7 @@ struct WorkshopsView: View {
                 VStack(spacing: 12) {
                     Image(systemName: "star.slash")
                         .font(.system(size: 40)).foregroundStyle(kTertiary)
-                    Text("No workshops in the next 2 weeks")
+                    Text("No workshops in the next \(scheduleDaysAhead) days")
                         .foregroundStyle(.white).font(.headline)
                 }
             } else {

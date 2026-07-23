@@ -16,8 +16,8 @@ struct LearnMoreView: View {
                     InfoCard(
                         icon: "calendar",
                         iconColor: .pink,
-                        title: "Classes in the next 2 weeks",
-                        detail: "We only surface classes happening within the next 14 days, so everything you see is coming up soon."
+                        title: "Classes in the next \(scheduleDaysAhead) days",
+                        detail: "We only surface classes happening within the next \(scheduleDaysAhead) days, so everything you see is coming up soon."
                     )
 
                     InfoCard(
