@@ -1154,7 +1154,9 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
     name = studio["name"]
     tag = sid[:8]
     today_str = date.today().isoformat()
-    cutoff = (date.today() + timedelta(days=_DAYS_AHEAD)).isoformat()
+    # today counts as day 1 of the window (see `days` calc in _report below), so the
+    # complete/partial boundary is today + (N - 1) — keep in sync with scrape_all()'s cutoff.
+    cutoff = (date.today() + timedelta(days=_DAYS_AHEAD - 1)).isoformat()
     db_exclude = studio.get("exclude_keywords") or []
     code_exclude = STUDIO_EXCLUDES.get(name, [])
     exclude = [kw.lower() for kw in (db_exclude or code_exclude)]
@@ -1331,7 +1333,9 @@ def scrape_all(studios: list[dict]):
     # max_workers must be >= 1 (ThreadPoolExecutor(0) raises) and no larger than the
     # number of studios; the env-tunable limit caps memory/CPU on small machines.
     max_workers = min(len(studios), _concurrency_limit())
-    cutoff = (date.today() + timedelta(days=_DAYS_AHEAD)).isoformat()
+    # today counts as day 1 of the window (matches _report's `days` calculation below),
+    # so the cutoff a studio must reach to count as "complete" is today + (N - 1), not + N.
+    cutoff = (date.today() + timedelta(days=_DAYS_AHEAD - 1)).isoformat()
     complete, partial, failed = [], [], []  # studio names, for the end-of-run summary
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_studio = {executor.submit(_fetch_studio_with_timeout, s): s for s in studios}
