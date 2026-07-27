@@ -439,7 +439,12 @@ def _scrape_rae_studios(url: str, days_ahead: int = 14) -> str:
     cutoff_date = date.today() + timedelta(days=days_ahead)
     with sync_playwright() as p:
         browser = p.chromium.launch()
-        page = browser.new_page(viewport={"width": 1280, "height": 3000})
+        # The Momence widget renders class times client-side in the browser's own
+        # timezone (no explicit tz pin, it defaults to whatever the OS/CI runner is —
+        # UTC on GitHub Actions), so without this every time comes out shifted +7/+8h
+        # from the real Pacific time, occasionally rolling the date forward too.
+        page = browser.new_page(viewport={"width": 1280, "height": 3000},
+                                 timezone_id="America/Los_Angeles")
         try:
             page.goto(url, wait_until="load", timeout=30000)
             page.wait_for_timeout(4000)
