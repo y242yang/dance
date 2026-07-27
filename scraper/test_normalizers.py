@@ -406,5 +406,51 @@ class TestMaxClassDate(unittest.TestCase):
         self.assertEqual(scraper._max_class_date(classes), "2026-07-10")
 
 
+class TestFlagAndDropAnomalies(unittest.TestCase):
+    def _class(self, title, start_time, instructor, day):
+        return {"title": title, "start_time": start_time, "instructor": instructor, "date": day}
+
+    def test_drops_next_day_clone_of_stale_tile_click(self):
+        # Reproduces the On One Studio 2026-07-27 bug: a day-tile-click race paired
+        # Monday's entire class list with Tuesday's date marker.
+        classes = [
+            self._class("BEG Choreography", "18:10:00", "Alyssa Corpuz", "2026-07-27"),
+            self._class("BEG/INT Grooves", "18:30:00", "Tad Racca", "2026-07-27"),
+            self._class("ADV Choreography", "19:35:00", "Anthony Chen", "2026-07-27"),
+            self._class("BEG Choreography", "18:10:00", "Alyssa Corpuz", "2026-07-28"),
+            self._class("BEG/INT Grooves", "18:30:00", "Tad Racca", "2026-07-28"),
+            self._class("ADV Choreography", "19:35:00", "Anthony Chen", "2026-07-28"),
+        ]
+        result = scraper._flag_and_drop_anomalies("sid", "Test Studio", classes)
+        self.assertEqual({c["date"] for c in result}, {"2026-07-27"})
+        self.assertEqual(len(result), 3)
+
+    def test_keeps_a_couple_of_coincidentally_repeated_classes(self):
+        # Below the minimum-shared threshold -- a studio can legitimately run the
+        # same single class two days running without it being a clone bug.
+        classes = [
+            self._class("Open Floor", "20:00:00", None, "2026-07-27"),
+            self._class("Open Floor", "20:00:00", None, "2026-07-28"),
+        ]
+        result = scraper._flag_and_drop_anomalies("sid", "Test Studio", classes)
+        self.assertEqual(len(result), 2)
+
+    def test_keeps_genuinely_distinct_adjacent_days(self):
+        classes = [
+            self._class("BEG/INT Grooves", "18:30:00", "Tad Racca", "2026-07-27"),
+            self._class("INT/ADV Grooves", "18:45:00", "Tad Racca", "2026-07-28"),
+        ]
+        result = scraper._flag_and_drop_anomalies("sid", "Test Studio", classes)
+        self.assertEqual(len(result), 2)
+
+    def test_implausible_hour_is_flagged_not_dropped(self):
+        # 00:30 -- the shape of the Rae Studios timezone bug (a UTC-shifted local
+        # afternoon class landing after midnight). Weak signal on its own (a real
+        # late-night class is plausible), so it's warned about, not auto-dropped.
+        classes = [self._class("Foundations: Grooves", "00:30:00", "Kait Skye", "2026-07-31")]
+        result = scraper._flag_and_drop_anomalies("sid", "Test Studio", classes)
+        self.assertEqual(len(result), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

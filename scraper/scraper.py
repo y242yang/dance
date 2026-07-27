@@ -736,6 +736,18 @@ def _strip_and_tag_day(text: str, today: date) -> str:
     return f"===CLASSDATE:{resolved.isoformat()}===\n" + text[m.start():]
 
 
+def _day_body(tagged_text: str) -> str:
+    """The class-listing portion of an already-tagged day chunk, with the
+    ===CLASSDATE=== marker and the header line itself excluded. On a tile click, the
+    visible date header updates client-side well before the (async-fetched) class
+    list does -- comparing the *whole* tagged chunk against the previous day's for
+    staleness is nearly a no-op, since the header alone differing is enough to make
+    the two strings unequal and the check passes before the list has actually caught
+    up. Comparing just this body is what actually catches the race."""
+    m = _DAY_HEADER_RE.search(tagged_text)
+    return tagged_text[m.end():] if m else tagged_text
+
+
 def fetch_page_text(url: str, days_ahead: int = 1) -> str:
     if "my.eds.dance" in url:
         return ""  # EDS handled directly in _fetch_studio via _fetch_eds_classes
@@ -854,14 +866,27 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
                             # leaving it unguarded here left the biggest source of
                             # the duplicate-day-capture race for _add_deduped to
                             # silently clean up after rather than catch at the source.
-                            for _ in range(3):
-                                if day_text != prev_day_text:
+                            # Compare _day_body, not the whole tagged chunk -- see its
+                            # docstring for why a whole-chunk compare doesn't actually
+                            # verify what it looks like it verifies.
+                            settled = False
+                            for _ in range(5):
+                                if _day_body(day_text) != _day_body(prev_day_text):
+                                    settled = True
                                     break
-                                page.wait_for_timeout(350)
+                                page.wait_for_timeout(400)
                                 day_text = _strip_and_tag_day(get_all_frames_text(page), date.today())
-                            else:
-                                print(f"  → WARNING: day content unchanged after tile click "
-                                      f"(possible stale-tile race) at day {days_collected + 1}, proceeding anyway")
+                            if not settled:
+                                # The class list never demonstrably changed from the
+                                # previous day's -- rather than risk silently pairing
+                                # this day's date marker with the previous day's
+                                # stale class list (exactly what happened to On One
+                                # Studio's Tuesday classes), drop this day. A dropped
+                                # day is a visible hole; a mispaired one silently
+                                # corrupts data under a plausible-looking date.
+                                print(f"  → WARNING: day content never settled after tile click "
+                                      f"(stale-tile race) at day {days_collected + 1}, dropping this day")
+                                continue
                             print(f"  → day {days_collected + 1}: {len(day_text)} chars")
                             all_text += "\n" + day_text
                             days_collected += 1
@@ -1241,6 +1266,69 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
         return sid, [], None
 
 
+_IMPLAUSIBLE_HOUR_RANGE = range(0, 5)  # 00:00-04:59: flag, never auto-drop (weak signal)
+_CLONE_MIN_SHARED = 3       # below this, could just be coincidental recurring classes
+_CLONE_MIN_FRACTION = 0.5   # of the smaller day's classes, to call it a clone not overlap
+
+
+def _class_signature(c: dict) -> tuple:
+    return (
+        (c.get("title") or "").strip().lower(),
+        c.get("start_time"),
+        (c.get("instructor") or "").strip().lower(),
+    )
+
+
+def _flag_and_drop_anomalies(sid: str, name: str, classes: list[dict]) -> list[dict]:
+    """Catches two shapes of scraper bug that unit tests can't, because both only
+    show up against real site behavior: (1) a studio's booking widget quietly
+    starts rendering client-side in the wrong timezone (as happened to Rae Studios),
+    which shows up as classes at implausible hours; (2) a stale-DOM race in a
+    day-tile-click loop pairs one day's class list with the *next* day's date
+    marker (as happened to On One Studio) -- which shows up as two adjacent dates
+    sharing a suspiciously large chunk of identical (title, start_time, instructor)
+    classes. (1) is too weak a signal to act on alone (a real late-night class is
+    plausible), so it's flagged only. (2) is specific enough to act on: drop the
+    later date's overlapping classes, since in every confirmed case so far the
+    earlier date's content was the genuine one and the later date's was the stale
+    clone."""
+    tag = sid[:8]
+    by_date: dict[str, list[dict]] = {}
+    for c in classes:
+        by_date.setdefault(c.get("date"), []).append(c)
+
+    for c in classes:
+        st = c.get("start_time") or ""
+        try:
+            hour = int(st.split(":")[0])
+        except (ValueError, IndexError):
+            continue
+        if hour in _IMPLAUSIBLE_HOUR_RANGE:
+            print(f"  → WARNING [{tag}] {name}: implausible start_time {st} on "
+                  f"{c.get('date')} for {c.get('title')!r} -- possible widget "
+                  f"timezone/rendering bug, not auto-corrected")
+
+    dropped_ids = set()
+    for d in sorted(day for day in by_date if day):
+        try:
+            next_day = (date.fromisoformat(d) + timedelta(days=1)).isoformat()
+        except ValueError:
+            continue
+        if next_day not in by_date:
+            continue
+        today_sigs = {_class_signature(c) for c in by_date[d]}
+        next_classes = by_date[next_day]
+        shared = [c for c in next_classes if _class_signature(c) in today_sigs]
+        if len(shared) >= _CLONE_MIN_SHARED and len(shared) >= _CLONE_MIN_FRACTION * len(next_classes):
+            print(f"  → WARNING [{tag}] {name}: {len(shared)}/{len(next_classes)} classes on "
+                  f"{next_day} are identical (title, time, instructor) to classes on {d} -- "
+                  f"dropping them as a suspected stale-tile-click clone rather than risk "
+                  f"shipping a misattributed day")
+            dropped_ids.update(id(c) for c in shared)
+
+    return [c for c in classes if id(c) not in dropped_ids]
+
+
 def _write_studio(studio: dict, classes: list[dict], covered_through: str):
     """Phase 2 (sequential): resolve locations then write classes to DB.
 
@@ -1250,6 +1338,7 @@ def _write_studio(studio: dict, classes: list[dict], covered_through: str):
     sid = studio["id"]
     name = studio["name"]
     tag = sid[:8]
+    classes = _flag_and_drop_anomalies(sid, name, classes)
     resolved = []
     # Process classes with an explicit city first, so if this studio has no pre-existing
     # location yet, get_or_create_location() creates one before any class falls back to
