@@ -866,25 +866,41 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
                             # leaving it unguarded here left the biggest source of
                             # the duplicate-day-capture race for _add_deduped to
                             # silently clean up after rather than catch at the source.
-                            # Compare _day_body, not the whole tagged chunk -- see its
-                            # docstring for why a whole-chunk compare doesn't actually
-                            # verify what it looks like it verifies.
+                            #
+                            # Poll for _day_body to STABILIZE (two consecutive reads
+                            # agree), not merely to differ from the previous day's.
+                            # An earlier version of this check treated "differs from
+                            # prev_day_text" as done -- but the header updates
+                            # instantly on click while the (async-fetched) class list
+                            # can pass through an intermediate state first (e.g. a
+                            # brief empty placeholder), which also differs from
+                            # prev_day_text and so satisfied that check before the
+                            # list had actually finished loading. Only agreement
+                            # between two successive reads of the SAME click's result
+                            # means the list itself, not just the header, is done.
+                            stable_reads = 0
                             settled = False
-                            for _ in range(5):
-                                if _day_body(day_text) != _day_body(prev_day_text):
-                                    settled = True
-                                    break
-                                page.wait_for_timeout(400)
-                                day_text = _strip_and_tag_day(get_all_frames_text(page), date.today())
+                            for _ in range(9):
+                                page.wait_for_timeout(500)
+                                new_text = _strip_and_tag_day(get_all_frames_text(page), date.today())
+                                if _day_body(new_text) == _day_body(day_text):
+                                    stable_reads += 1
+                                    if stable_reads >= 2:
+                                        settled = True
+                                        day_text = new_text
+                                        break
+                                else:
+                                    stable_reads = 0
+                                day_text = new_text
                             if not settled:
-                                # The class list never demonstrably changed from the
-                                # previous day's -- rather than risk silently pairing
-                                # this day's date marker with the previous day's
-                                # stale class list (exactly what happened to On One
-                                # Studio's Tuesday classes), drop this day. A dropped
-                                # day is a visible hole; a mispaired one silently
-                                # corrupts data under a plausible-looking date.
-                                print(f"  → WARNING: day content never settled after tile click "
+                                # The class list never stopped changing long enough to
+                                # trust it -- rather than risk silently pairing this
+                                # day's date marker with a mid-transition or stale
+                                # class list (exactly what happened to On One
+                                # Studio's Tuesday and Wednesday classes), drop this
+                                # day. A dropped day is a visible hole; a mispaired
+                                # one silently corrupts data under a plausible date.
+                                print(f"  → WARNING: day content never stabilized after tile click "
                                       f"(stale-tile race) at day {days_collected + 1}, dropping this day")
                                 continue
                             print(f"  → day {days_collected + 1}: {len(day_text)} chars")
