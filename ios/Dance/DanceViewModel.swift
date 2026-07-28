@@ -92,7 +92,6 @@ final class DanceViewModel {
             classes = try await supabase
                 .from("classes")
                 .select("*, studios(name, schedule_urls), locations(name, address, city)")
-                .eq("is_canceled", value: false)
                 .gte("date", value: today)
                 .lte("date", value: cutoff)
                 .order("date", ascending: true)

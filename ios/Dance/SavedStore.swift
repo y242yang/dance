@@ -13,9 +13,8 @@ struct LogEntry: Codable, Identifiable {
     var studio: String
     var notes: String
     var sourceClassId: String?  // non-nil = logged from a hearted class
-    var isCanceled: Bool = false  // source class was canceled after commit; source_class_id has been detached
 
-    var isManual: Bool { sourceClassId == nil && !isCanceled }
+    var isManual: Bool { sourceClassId == nil }
 
     /// Two logged sessions count as the "same" for the shared-session badge:
     /// same source class, or (for manual entries, which have no class id to
@@ -221,7 +220,6 @@ struct CloudLogEntry: Codable {
     let studio: String
     let notes: String
     let sourceClassId: UUID?
-    let isCanceled: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, date, title, level, instructor, studio, notes
@@ -229,7 +227,6 @@ struct CloudLogEntry: Codable {
         case durationMinutes = "duration_minutes"
         case danceStyle = "dance_style"
         case sourceClassId = "source_class_id"
-        case isCanceled = "is_canceled"
     }
 
     init(userId: UUID, entry: LogEntry) {
@@ -244,15 +241,13 @@ struct CloudLogEntry: Codable {
         studio = entry.studio
         notes = entry.notes
         sourceClassId = entry.sourceClassId.flatMap(UUID.init)
-        isCanceled = entry.isCanceled
     }
 
     var asLogEntry: LogEntry {
         LogEntry(
             id: id, date: date, duration: durationMinutes, title: title,
             danceStyle: danceStyle, level: level, instructor: instructor,
-            studio: studio, notes: notes, sourceClassId: sourceClassId?.uuidString,
-            isCanceled: isCanceled
+            studio: studio, notes: notes, sourceClassId: sourceClassId?.uuidString
         )
     }
 }

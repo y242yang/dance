@@ -22,14 +22,6 @@ struct LogEntryRow: View {
                 Text("· \(entry.duration) min")
                     .font(.caption).foregroundStyle(kTertiary)
                 Spacer()
-                if entry.isCanceled {
-                    Text("Canceled")
-                        .font(.caption2).fontWeight(.semibold)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(Color.red.opacity(0.25))
-                        .foregroundStyle(.red)
-                        .clipShape(Capsule())
-                }
                 if isShared {
                     Image(systemName: "person.2.fill")
                         .font(.system(size: 11))
@@ -189,20 +181,6 @@ struct LogEntryDetailSheet: View {
                 Color.black.ignoresSafeArea()
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
-                        if entry.isCanceled {
-                            HStack(spacing: 8) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                Text("This class was canceled by the studio.")
-                            }
-                            .font(.subheadline).fontWeight(.semibold)
-                            .foregroundStyle(.red)
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.red.opacity(0.15))
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .padding(.horizontal, 16)
-                            .padding(.top, 16)
-                        }
                         VStack(spacing: 0) {
                             DetailRow(icon: "calendar", label: "Date", value: entry.date.formatted(date: .long, time: .omitted))
                             Divider().overlay(Color(white: 0.18)).padding(.leading, 50)

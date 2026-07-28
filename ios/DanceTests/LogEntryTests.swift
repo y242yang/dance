@@ -5,34 +5,25 @@ final class LogEntryTests: XCTestCase {
 
     private func makeEntry(
         sourceClassId: String? = nil,
-        isCanceled: Bool = false,
         date: Date = Date(),
         instructor: String = "Yanis Marshall"
     ) -> LogEntry {
         LogEntry(
             date: date, duration: 60, title: "Heels", danceStyle: "Heels",
             level: "advanced", instructor: instructor, studio: "Moving Arts",
-            notes: "", sourceClassId: sourceClassId, isCanceled: isCanceled
+            notes: "", sourceClassId: sourceClassId
         )
     }
 
     // MARK: - isManual
 
-    func testManualEntryHasNoSourceClassAndIsNotCanceled() {
-        let entry = makeEntry(sourceClassId: nil, isCanceled: false)
+    func testManualEntryHasNoSourceClass() {
+        let entry = makeEntry(sourceClassId: nil)
         XCTAssertTrue(entry.isManual)
     }
 
     func testClassSourcedEntryIsNotManual() {
-        let entry = makeEntry(sourceClassId: UUID().uuidString, isCanceled: false)
-        XCTAssertFalse(entry.isManual)
-    }
-
-    func testCanceledEntryIsNotTreatedAsManualEvenThoughSourceClassIdIsNil() {
-        // This is exactly the bug the flag exists to fix: once a class is
-        // canceled, the FK detaches (source_class_id -> NULL), but the entry
-        // must still render read-only, not flip into the editable manual sheet.
-        let entry = makeEntry(sourceClassId: nil, isCanceled: true)
+        let entry = makeEntry(sourceClassId: UUID().uuidString)
         XCTAssertFalse(entry.isManual)
     }
 

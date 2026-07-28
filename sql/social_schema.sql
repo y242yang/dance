@@ -195,3 +195,29 @@ CREATE TRIGGER classes_before_delete_mark_canceled
 -- covers both a genuine studio cancellation and a scraper miss that drops a class
 -- that should still be there.
 ALTER TABLE classes ADD COLUMN IF NOT EXISTS is_canceled BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Migration (2026-07-27): remove the soft-cancel/preserve-on-scraper-miss design
+-- entirely, by explicit choice. A class missing from a fresh scrape now disappears
+-- everywhere it's referenced - the general list, saved_classes, and log_entries -
+-- with no detached/canceled state kept anywhere. Trade-off accepted: a scraper bug
+-- that misses a class you have saved or committed to now silently deletes that
+-- save/commitment too, with no recovery. (This is what the removed design existed
+-- to prevent, per the 2026-07-12/13 On One Studio incident - see project history.)
+--
+-- 1. log_entries: was ON DELETE SET NULL (detach and flag canceled). Now cascades,
+--    so a committed-but-not-yet-happened class disappears along with its source.
+ALTER TABLE log_entries DROP CONSTRAINT log_entries_source_class_id_fkey;
+ALTER TABLE log_entries ADD CONSTRAINT log_entries_source_class_id_fkey
+  FOREIGN KEY (source_class_id) REFERENCES classes(id) ON DELETE CASCADE;
+
+-- 2. The trigger/function that flagged log_entries.is_canceled on a detach no
+--    longer has anything to do - cascade deletes the row before there's a chance
+--    to flag it - so it's dead code. Drop it.
+DROP TRIGGER IF EXISTS classes_before_delete_mark_canceled ON classes;
+DROP FUNCTION IF EXISTS mark_log_entries_canceled();
+
+-- 3. Both is_canceled columns are now permanently unused - nothing sets classes.is_canceled
+--    true anymore (replace_future_classes just deletes), and nothing sets
+--    log_entries.is_canceled true anymore (the trigger that did is gone).
+ALTER TABLE log_entries DROP COLUMN IF EXISTS is_canceled;
+ALTER TABLE classes DROP COLUMN IF EXISTS is_canceled;
