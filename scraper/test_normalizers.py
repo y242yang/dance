@@ -40,6 +40,8 @@ _db = types.ModuleType("db")
 _db.get_or_create_location = lambda *a, **k: None
 _db.replace_future_classes = lambda *a, **k: None
 _db.get_default_location = lambda *a, **k: None
+_db.fetch_window_class_ids = lambda *a, **k: set()
+_db.fetch_window_rows = lambda *a, **k: []
 sys.modules["db"] = _db
 
 import scraper  # noqa: E402  (import after stubs are in place)
@@ -453,6 +455,126 @@ class TestFlagAndDropAnomalies(unittest.TestCase):
         self.assertEqual(len(result), 1)
 
 
+class TestClampToWindow(unittest.TestCase):
+    """No fetch path may hand replace_future_classes a class dated outside the window the
+    scrape vouches for — it would be written but sit outside the range later runs prune."""
+
+    def test_drops_the_day_past_the_cutoff(self):
+        # Western Ballet's widget returns an 11th day when asked for 10.
+        classes = [{"date": "2026-08-21"}, {"date": "2026-08-22"}]
+        kept = scraper._clamp_to_window(classes, "2026-08-12", "2026-08-21")
+        self.assertEqual([c["date"] for c in kept], ["2026-08-21"])
+
+    def test_drops_dates_before_today(self):
+        classes = [{"date": "2026-08-11"}, {"date": "2026-08-12"}]
+        kept = scraper._clamp_to_window(classes, "2026-08-12", "2026-08-21")
+        self.assertEqual([c["date"] for c in kept], ["2026-08-12"])
+
+    def test_keeps_both_boundaries(self):
+        classes = [{"date": "2026-08-12"}, {"date": "2026-08-21"}]
+        kept = scraper._clamp_to_window(classes, "2026-08-12", "2026-08-21")
+        self.assertEqual(len(kept), 2)
+
+    def test_drops_classes_with_no_date(self):
+        kept = scraper._clamp_to_window([{"date": None}, {}], "2026-08-12", "2026-08-21")
+        self.assertEqual(kept, [])
+
+
+class TestWriteVerification(unittest.TestCase):
+    """Reads back what landed in the DB and compares it to what was written — the one
+    question no fetch-side check asks, and the one that would have caught Enjoy Dance
+    Studio's rejected writes on day one."""
+
+    def test_matching_sets_report_no_problem(self):
+        self.assertIsNone(scraper._write_discrepancy({"a", "b"}, {"a", "b"}))
+
+    def test_rows_written_but_not_stored(self):
+        problem = scraper._write_discrepancy({"a", "b"}, {"a"})
+        self.assertIn("1 row(s) written but not stored", problem)
+
+    def test_rows_stored_that_this_scrape_did_not_write(self):
+        problem = scraper._write_discrepancy({"a"}, {"a", "ghost"})
+        self.assertIn("1 stored row(s) not in this scrape", problem)
+
+    def test_reports_both_directions_at_once(self):
+        problem = scraper._write_discrepancy({"a", "b"}, {"a", "ghost"})
+        self.assertIn("written but not stored", problem)
+        self.assertIn("not in this scrape", problem)
+
+    def test_empty_write_and_empty_store_agree(self):
+        self.assertIsNone(scraper._write_discrepancy(set(), set()))
+
+    def test_verify_treats_an_unreadable_db_as_unverified(self):
+        # Can't confirm != confirmed. A read failure must not pass as success.
+        def boom(*a, **k):
+            raise RuntimeError("connection reset")
+
+        with patch.object(scraper, "fetch_window_class_ids", boom):
+            self.assertFalse(scraper._verify_write("sid", "S", {"a"}, "2026-08-21"))
+
+    def test_verify_passes_when_stored_matches(self):
+        with patch.object(scraper, "fetch_window_class_ids", lambda *a, **k: {"a", "b"}):
+            self.assertTrue(scraper._verify_write("sid", "S", {"a", "b"}, "2026-08-21"))
+
+
+class TestWindowHealth(unittest.TestCase):
+    """The end-of-run report reads STORED rows, so a studio serving nothing shows up as
+    serving nothing — regardless of what its fetch believed it collected."""
+
+    def setUp(self):
+        self.window = [(scraper.date.today() + scraper.timedelta(days=i)).isoformat()
+                       for i in range(scraper._DAYS_AHEAD)]
+        self.studios = [{"id": "s1", "name": "Alpha"}, {"id": "s2", "name": "Beta"}]
+
+    def _rows(self, sid, offsets):
+        return [{"studio_id": sid, "date": self.window[i]} for i in offsets]
+
+    def test_healthy_studio_has_no_flag(self):
+        rows = self._rows("s1", range(scraper._DAYS_AHEAD)) + self._rows("s2", [0, 1, 2, 3, 4])
+        health = {h["name"]: h for h in
+                  scraper._window_health(rows, self.studios, self.window)}
+        self.assertEqual(health["Alpha"]["flag"], "")
+        self.assertEqual(health["Alpha"]["days"], scraper._DAYS_AHEAD)
+        self.assertEqual(health["Beta"]["flag"], "")
+
+    def test_studio_with_nothing_stored_is_flagged(self):
+        # The state a repeatedly-failing studio decays into: its rows expire day by day
+        # until the app shows nothing, which no fetch-side check can see.
+        rows = self._rows("s1", [0, 1, 2, 3, 4])
+        health = {h["name"]: h for h in
+                  scraper._window_health(rows, self.studios, self.window)}
+        self.assertEqual(health["Beta"]["flag"], "NO CLASSES STORED")
+        self.assertEqual(health["Beta"]["rows"], 0)
+        self.assertIsNone(health["Beta"]["first"])
+
+    def test_thin_coverage_is_flagged(self):
+        rows = self._rows("s1", range(scraper._DAYS_AHEAD)) + self._rows("s2", [7, 8])
+        health = {h["name"]: h for h in
+                  scraper._window_health(rows, self.studios, self.window)}
+        self.assertIn("thin", health["Beta"]["flag"])
+
+    def test_rows_outside_the_window_are_not_counted_as_days(self):
+        past = (scraper.date.today() - scraper.timedelta(days=3)).isoformat()
+        rows = [{"studio_id": "s1", "date": past}]
+        health = {h["name"]: h for h in
+                  scraper._window_health(rows, self.studios, self.window)}
+        self.assertEqual(health["Alpha"]["days"], 0)
+        self.assertEqual(health["Alpha"]["flag"], "NO CLASSES STORED")
+
+    def test_rows_for_an_unknown_studio_are_ignored(self):
+        # A studio deleted from `studios` but with rows still present must not crash or
+        # appear in the report.
+        rows = self._rows("s1", [0]) + [{"studio_id": "gone", "date": self.window[0]}]
+        names = {h["name"] for h in
+                 scraper._window_health(rows, self.studios, self.window)}
+        self.assertEqual(names, {"Alpha", "Beta"})
+
+    def test_flagged_studios_sort_first(self):
+        rows = self._rows("s1", range(scraper._DAYS_AHEAD))
+        health = scraper._window_health(rows, self.studios, self.window)
+        self.assertEqual(health[0]["name"], "Beta")  # the flagged one
+
+
 class TestEdsFetch(unittest.TestCase):
     """my.eds.dance is a shared booking platform, so EDS's query has to assert which
     tenant it's asking about — the same identity concern as the Healcode path."""
@@ -643,10 +765,18 @@ class TestWriteStudioDedup(unittest.TestCase):
         def fake_replace(sid, resolved, covered_through):
             captured["resolved"] = resolved
 
+        # Read-back returns exactly what was written, so the write verifies and these
+        # tests exercise dedup alone.
+        def fake_readback(sid, from_date, to_date):
+            return {c["id"] for c in captured.get("resolved", [])}
+
         with patch.object(scraper, "replace_future_classes", fake_replace), \
+             patch.object(scraper, "fetch_window_class_ids", fake_readback), \
              patch.object(scraper, "get_default_location", lambda sid: "loc-default"), \
              patch.object(scraper, "get_or_create_location", lambda *a, **k: "loc-city"):
-            scraper._write_studio({"id": "studio-1", "name": "Test Studio"}, classes, "2026-08-20")
+            verified = scraper._write_studio({"id": "studio-1", "name": "Test Studio"},
+                                             classes, "2026-08-20")
+        self.assertTrue(verified)
         return captured["resolved"]
 
     def test_drops_duplicate_ids_within_one_payload(self):

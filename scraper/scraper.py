@@ -10,7 +10,8 @@ from datetime import date, timedelta
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from playwright.sync_api import sync_playwright
-from db import get_or_create_location, replace_future_classes, get_default_location
+from db import (get_or_create_location, replace_future_classes, get_default_location,
+                fetch_window_class_ids, fetch_window_rows)
 
 # Fixed namespace so the same (studio, title, date, start_time) always hashes to the
 # same class id across scrapes — lets clients (e.g. "saved"/hearted classes) reference
@@ -1328,6 +1329,21 @@ _DAYS_AHEAD = 10
 _LEADING_EMPTY_DAYS_WARN = 3
 
 
+def _clamp_to_window(classes: list[dict], today_str: str, cutoff: str) -> list[dict]:
+    """Drop classes dated outside [today_str, cutoff], the range a scrape vouches for.
+
+    replace_future_classes prunes only inside that range and upserts everything handed
+    to it, so a class dated past the cutoff is written but sits outside the window any
+    later run will refresh -- its own docstring says callers must not pass those. The
+    generic Playwright path has always clamped; the direct-API paths never did, because
+    each asks its source for today+days_ahead while the window's last day is
+    today+(days_ahead-1). Western Ballet's widget duly returned an 11th day and wrote 4
+    rows nobody vouched for (caught 2026-08-12 by _verify_write, on its first real run).
+    EDS avoided it only by accident of its UTC-boundary arithmetic. Clamping every path
+    through one helper means no future fetch strategy can reintroduce it."""
+    return [c for c in classes if today_str <= (c.get("date") or "") <= cutoff]
+
+
 def _leading_empty_days(classes: list[dict], coverage: str) -> tuple[int, bool]:
     """(count of consecutive empty days at the START of [today, coverage], whether any
     day after that run has classes).
@@ -1421,7 +1437,9 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
         # The EDS API returns the whole [today, cutoff] window in one call, so a
         # non-empty result is authoritative through the full cutoff.
         if any("my.eds.dance" in u for u in urls):
-            classes = _apply_exclude(_fetch_eds_classes(sid, days_ahead=_DAYS_AHEAD))
+            classes = _clamp_to_window(
+                _apply_exclude(_fetch_eds_classes(sid, days_ahead=_DAYS_AHEAD)),
+                today_str, cutoff)
             coverage = cutoff if classes else None
             _report(classes, coverage)
             return sid, classes, coverage
@@ -1431,8 +1449,10 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
         # explicit machine-readable fields, so a non-empty result is authoritative
         # through the full cutoff, same as EDS above.
         if any("widgets.mindbodyonline.com/widgets/schedules" in u for u in urls):
-            classes = _apply_exclude(
-                _fetch_healcode_widget(urls[0], name, sid, days_ahead=_DAYS_AHEAD))
+            classes = _clamp_to_window(
+                _apply_exclude(
+                    _fetch_healcode_widget(urls[0], name, sid, days_ahead=_DAYS_AHEAD)),
+                today_str, cutoff)
             coverage = cutoff if classes else None
             _report(classes, coverage)
             return sid, classes, coverage
@@ -1455,7 +1475,7 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
             _report([], None)
             return sid, [], None
         classes = _parse_raw_by_day(all_text, sid, name)
-        classes = [c for c in classes if today_str <= (c.get("date") or "") <= cutoff]
+        classes = _clamp_to_window(classes, today_str, cutoff)
         classes = _apply_exclude(classes)
         # Coverage watermark = furthest date we actually parsed. Empty parse → None
         # (preserve existing data); otherwise trust only up to the last date we saw.
@@ -1532,8 +1552,9 @@ def _flag_and_drop_anomalies(sid: str, name: str, classes: list[dict]) -> list[d
     return [c for c in classes if id(c) not in dropped_ids]
 
 
-def _write_studio(studio: dict, classes: list[dict], covered_through: str):
-    """Phase 2 (sequential): resolve locations then write classes to DB.
+def _write_studio(studio: dict, classes: list[dict], covered_through: str) -> bool:
+    """Phase 2 (sequential): resolve locations then write classes to DB. Returns whether
+    the write was verified to have landed (see _verify_write).
 
     `covered_through` is the furthest date this scrape vouches for; it scopes the
     prune in replace_future_classes so later-dated rows from a more-complete prior
@@ -1583,6 +1604,55 @@ def _write_studio(studio: dict, classes: list[dict], covered_through: str):
         resolved.append(c)
     replace_future_classes(sid, resolved, covered_through)
     print(f"[{tag}] {name}: {len(resolved)} classes saved (through {covered_through})")
+    return _verify_write(sid, name, {c["id"] for c in resolved}, covered_through)
+
+
+def _write_discrepancy(written_ids: set, stored_ids: set) -> "str | None":
+    """Description of how the stored rows differ from what was just written, or None.
+
+    Kept separate from the DB read so the comparison itself is testable. `stored` is
+    scoped to the same [today, covered_through] window the write was scoped to, so
+    later-dated rows from an earlier, more-complete run are correctly not "extra"."""
+    missing = written_ids - stored_ids
+    extra = stored_ids - written_ids
+    if not missing and not extra:
+        return None
+    parts = []
+    if missing:
+        parts.append(f"{len(missing)} row(s) written but not stored")
+    if extra:
+        parts.append(f"{len(extra)} stored row(s) not in this scrape")
+    return "; ".join(parts)
+
+
+def _verify_write(sid: str, name: str, written_ids: set, covered_through: str) -> bool:
+    """Read back what actually landed and confirm it matches what was just written.
+
+    Everything else in this pipeline reasons about the *fetch*. Enjoy Dance Studio's
+    2026-08-10/11 outage was invisible to all of it because the fetch was perfect and
+    the write was rejected -- so the one question nobody was asking was "is the data
+    in the database the data we meant to put there". This asks it directly, and it
+    would have caught that outage on day one even if the RPC had failed silently
+    instead of raising.
+
+    A mismatch does not roll anything back (the write is already committed and is
+    still the best data available); it marks the studio unverified so the run goes
+    red and a human looks."""
+    tag = sid[:8]
+    try:
+        stored = fetch_window_class_ids(sid, date.today().isoformat(), covered_through)
+    except Exception as e:
+        print(f"  → WARNING [{tag}] {name}: could not read back written classes to verify "
+              f"them ({e}); treating the write as unverified")
+        return False
+    problem = _write_discrepancy(written_ids, stored)
+    if problem:
+        print(f"  → WARNING [{tag}] {name}: what's stored doesn't match what was just "
+              f"written — {problem}. The write reported success, so something else is "
+              f"changing these rows (a concurrent run, a failed partial apply, or an RLS "
+              f"policy filtering the write).")
+        return False
+    return True
 
 
 _STUDIO_TIMEOUT_SECONDS = 240
@@ -1658,14 +1728,15 @@ def scrape_all(studios: list[dict]) -> dict:
     # for the slowest one — one stuck studio no longer delays or blocks everyone else's data.
     if not studios:
         print("No studios to scrape.")
-        return {"complete": [], "partial": [], "failed": [], "total": 0}
+        return {"complete": [], "partial": [], "failed": [], "unverified": [], "total": 0}
     # max_workers must be >= 1 (ThreadPoolExecutor(0) raises) and no larger than the
     # number of studios; the env-tunable limit caps memory/CPU on small machines.
     max_workers = min(len(studios), _concurrency_limit())
     # today counts as day 1 of the window (matches _report's `days` calculation below),
     # so the cutoff a studio must reach to count as "complete" is today + (N - 1), not + N.
     cutoff = (date.today() + timedelta(days=_DAYS_AHEAD - 1)).isoformat()
-    complete, partial, failed = [], [], []  # studio names, for the end-of-run summary
+    # Studio names, for the end-of-run summary and the process exit code.
+    complete, partial, failed, unverified = [], [], [], []
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_studio = {executor.submit(_fetch_studio_with_timeout, s): s for s in studios}
         for future in as_completed(future_to_studio):
@@ -1685,8 +1756,13 @@ def scrape_all(studios: list[dict]) -> dict:
                     continue
                 # covered_through is a date: `classes` is authoritative for
                 # [today, covered_through]. Prune + upsert only within that range.
-                _write_studio(studio, classes, covered_through)
-                (complete if covered_through >= cutoff else partial).append(name)
+                if not _write_studio(studio, classes, covered_through):
+                    # Written, but the rows aren't what we just wrote — surface it as its
+                    # own bucket rather than "complete" (misleading) or "failed" (which
+                    # says existing data was kept, when in fact new data was written).
+                    unverified.append(name)
+                else:
+                    (complete if covered_through >= cutoff else partial).append(name)
             except Exception as e:
                 print(f"[{tag}] {name}: FAILED, skipping ({e})")
                 failed.append(name)
@@ -1694,11 +1770,74 @@ def scrape_all(studios: list[dict]) -> dict:
     # Run summary — makes silent partial/failed studios visible at a glance.
     print(
         f"\nScrape summary: {len(complete)} complete, {len(partial)} partial, "
-        f"{len(failed)} failed (of {len(studios)} studios)."
+        f"{len(failed)} failed, {len(unverified)} unverified (of {len(studios)} studios)."
     )
     if partial:
         print(f"  PARTIAL (didn't reach {cutoff}): {', '.join(sorted(partial))}")
     if failed:
         print(f"  FAILED (kept existing data): {', '.join(sorted(failed))}")
+    if unverified:
+        print(f"  UNVERIFIED (written, but stored rows don't match): "
+              f"{', '.join(sorted(unverified))}")
+    _print_window_health(studios)
     return {"complete": complete, "partial": partial, "failed": failed,
-            "total": len(studios)}
+            "unverified": unverified, "total": len(studios)}
+
+
+# Below this many of the next _DAYS_AHEAD days having any class at all, a studio is worth
+# a look. Chosen from the real spread on 2026-08-11: the healthy studios covered 8-10 days
+# and the two known-degraded ones covered 3 and 5, so 4 separates them without flagging a
+# studio that's merely closed a couple of days a week.
+_THIN_COVERAGE_DAYS = 4
+
+
+def _window_health(rows: list[dict], studios: list[dict], window: list[str]) -> list[dict]:
+    """Per-studio {name, rows, days, first, last, flag} read from what's STORED, not from
+    what the fetch believed. Pure, so the thresholds are testable without a database."""
+    by_studio: dict = {s["id"]: {"name": s["name"], "dates": []} for s in studios}
+    for r in rows:
+        entry = by_studio.get(r.get("studio_id"))
+        if entry is not None:
+            entry["dates"].append(r.get("date"))
+    out = []
+    for sid, entry in by_studio.items():
+        days = sorted({d for d in entry["dates"] if d in set(window)})
+        flag = ""
+        if not days:
+            flag = "NO CLASSES STORED"
+        elif len(days) < _THIN_COVERAGE_DAYS:
+            flag = f"thin — only {len(days)} of {len(window)} days"
+        out.append({"name": entry["name"], "rows": len(entry["dates"]), "days": len(days),
+                    "first": days[0] if days else None, "last": days[-1] if days else None,
+                    "flag": flag})
+    return sorted(out, key=lambda r: (r["flag"] == "", r["days"]))
+
+
+def _print_window_health(studios: list[dict]):
+    """End-of-run report of what a user would actually see, read back from the DB.
+
+    Distinct from the per-studio fetch reports above: those say what each scrape
+    believed it collected, which is exactly the thing that was wrong for two days
+    running while every line looked healthy. This reads the stored rows instead, so a
+    studio serving nothing shows up as serving nothing.
+
+    Deliberately does NOT fail the run. A studio can legitimately be dark for a stretch
+    (holiday closure, a small studio between sessions), and a check that can't be
+    silenced turns into one that gets ignored -- the failure mode this whole effort is
+    about. Writes that didn't land DO fail the run; "this studio looks empty" is a
+    prompt to look."""
+    window = [(date.today() + timedelta(days=i)).isoformat() for i in range(_DAYS_AHEAD)]
+    try:
+        rows = fetch_window_rows(window[0], window[-1])
+    except Exception as e:
+        print(f"\nStored-data health check could not run ({e}).")
+        return
+    print(f"\nStored data for {window[0]}..{window[-1]} (what the app will show):")
+    for r in _window_health(rows, studios, window):
+        line = (f"  {r['name']:<26} {r['rows']:>4} classes over {r['days']:>2}/"
+                f"{len(window)} days")
+        if r["first"]:
+            line += f"  ({r['first']}..{r['last']})"
+        if r["flag"]:
+            line += f"   <-- {r['flag']}"
+        print(line)

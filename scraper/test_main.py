@@ -37,6 +37,8 @@ if "db" not in sys.modules:
     _db.get_or_create_location = lambda *a, **k: None
     _db.replace_future_classes = lambda *a, **k: None
     _db.get_default_location = lambda *a, **k: None
+    _db.fetch_window_class_ids = lambda *a, **k: set()
+    _db.fetch_window_rows = lambda *a, **k: []
     sys.modules["db"] = _db
 else:
     for _name, _fn in (("get_studios", lambda: []),
@@ -48,10 +50,11 @@ else:
 import main  # noqa: E402
 
 
-def _summary(complete=(), partial=(), failed=(), total=None):
-    names = list(complete) + list(partial) + list(failed)
+def _summary(complete=(), partial=(), failed=(), unverified=(), total=None):
+    names = list(complete) + list(partial) + list(failed) + list(unverified)
     return {"complete": list(complete), "partial": list(partial),
-            "failed": list(failed), "total": len(names) if total is None else total}
+            "failed": list(failed), "unverified": list(unverified),
+            "total": len(names) if total is None else total}
 
 
 class TestExitCode(unittest.TestCase):
@@ -73,6 +76,17 @@ class TestExitCode(unittest.TestCase):
     def test_partial_and_failed_together_still_fails(self):
         self.assertEqual(
             main.exit_code(_summary(partial=["A"], failed=["B"])), 1)
+
+    def test_unverified_write_fails_the_run(self):
+        # Rows were written but read back as something else — nobody can tell which rows
+        # the app is showing, so this needs a human, not a log line.
+        self.assertEqual(
+            main.exit_code(_summary(complete=["A"], unverified=["B"])), 1)
+
+    def test_summary_without_unverified_key_still_succeeds(self):
+        # Back-compat: a summary predating the unverified bucket must not read as failure.
+        self.assertEqual(
+            main.exit_code({"complete": ["A"], "partial": [], "failed": [], "total": 1}), 0)
 
     def test_zero_studios_fails(self):
         # An empty studio list is a broken query/config, not an absence of work.

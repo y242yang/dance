@@ -15,7 +15,7 @@ def run() -> dict:
 
 
 def exit_code(summary: dict) -> int:
-    """0 if every studio's data was written, 1 if any studio's write didn't happen.
+    """0 if every studio's data was written and verified, 1 otherwise.
 
     The daily GitHub Actions run is unattended, so the exit code is the only thing
     that reaches anyone: a failed scheduled run emails the repo owner, a green one
@@ -38,6 +38,14 @@ def exit_code(summary: dict) -> int:
     failed = summary.get("failed") or []
     if failed:
         print(f"FAIL: {len(failed)} studio(s) kept stale data: {', '.join(sorted(failed))}")
+        return 1
+    # Written, but reading the rows back showed something other than what was written.
+    # Fails for the same reason `failed` does: nobody can tell from the app which rows
+    # are which, so it needs a human, not a log line.
+    unverified = summary.get("unverified") or []
+    if unverified:
+        print(f"FAIL: {len(unverified)} studio(s) wrote data that didn't read back as "
+              f"expected: {', '.join(sorted(unverified))}")
         return 1
     return 0
 

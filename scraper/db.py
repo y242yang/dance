@@ -53,6 +53,37 @@ def delete_past_log_entries():
     today = date.today().isoformat()
     get_client().table("log_entries").delete().lt("date", today).execute()
 
+# PostgREST caps an unbounded select at 1000 rows. The whole 10-day window across every
+# studio is a few hundred today, but an implicit cap would silently under-report the
+# health check that exists to catch under-reporting, so it's explicit and checked.
+_MAX_WINDOW_ROWS = 20000
+
+
+def fetch_window_class_ids(studio_id: str, from_date: str, to_date: str) -> set:
+    """Ids of the classes actually stored for a studio in [from_date, to_date].
+
+    Read back immediately after a write so the run can prove the write landed, rather
+    than trusting that the RPC returning without an exception means the rows are there.
+    """
+    rows = get_client().table("classes").select("id") \
+        .eq("studio_id", studio_id).gte("date", from_date).lte("date", to_date) \
+        .limit(_MAX_WINDOW_ROWS).execute().data
+    return {r["id"] for r in rows}
+
+
+def fetch_window_rows(from_date: str, to_date: str) -> list[dict]:
+    """(studio_id, date) for every stored class in the window, in one query, for the
+    end-of-run health report. One query rather than per-studio so the report costs the
+    same whether there are 12 studios or 50."""
+    rows = get_client().table("classes").select("studio_id,date") \
+        .gte("date", from_date).lte("date", to_date) \
+        .limit(_MAX_WINDOW_ROWS).execute().data
+    if len(rows) >= _MAX_WINDOW_ROWS:
+        print(f"  → WARNING: window read hit the {_MAX_WINDOW_ROWS}-row cap; the health "
+              f"report below is incomplete. Raise _MAX_WINDOW_ROWS in db.py.")
+    return rows
+
+
 def replace_future_classes(studio_id: str, classes: list[dict], covered_through: str):
     """Upsert by (deterministic) id so unchanged classes keep the same id across
     scrapes — clients that reference a class by id (e.g. saved/hearted classes)
