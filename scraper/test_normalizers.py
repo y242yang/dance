@@ -452,6 +452,53 @@ class TestFlagAndDropAnomalies(unittest.TestCase):
         self.assertEqual(len(result), 1)
 
 
+class TestLeadingEmptyDays(unittest.TestCase):
+    """Guards the detector for the How About Dance failure shape: one fetch mechanism
+    returns nothing for the near days while another covers the far ones, which the
+    max(class date) coverage watermark scores as a perfect run."""
+
+    def setUp(self):
+        self.today = scraper.date.today()
+
+    def _day(self, offset):
+        return (self.today + scraper.timedelta(days=offset)).isoformat()
+
+    def _coverage(self, offset=9):
+        return self._day(offset)
+
+    def test_detects_leading_empty_run_with_later_days_populated(self):
+        # The exact 2026-08-11 shape: days 1-7 empty, days 8-10 fine.
+        classes = [{"date": self._day(i)} for i in (7, 8, 9)]
+        leading, populated_after = scraper._leading_empty_days(classes, self._coverage())
+        self.assertEqual(leading, 7)
+        self.assertTrue(populated_after)
+
+    def test_single_empty_today_is_not_flagged(self):
+        # Routine: a same-day booking cutoff has passed, so today lists nothing.
+        classes = [{"date": self._day(i)} for i in range(1, 10)]
+        leading, _ = scraper._leading_empty_days(classes, self._coverage())
+        self.assertLess(leading, scraper._LEADING_EMPTY_DAYS_WARN)
+
+    def test_interior_gaps_are_not_counted(self):
+        # A studio that genuinely goes dark midweek must not trip the check.
+        classes = [{"date": self._day(i)} for i in (0, 1, 5, 9)]
+        leading, _ = scraper._leading_empty_days(classes, self._coverage())
+        self.assertEqual(leading, 0)
+
+    def test_all_empty_reports_nothing_after(self):
+        # No classes at all is already handled as a failed fetch; don't double-report.
+        leading, populated_after = scraper._leading_empty_days([], self._coverage())
+        self.assertEqual(leading, 0)
+        self.assertFalse(populated_after)
+
+    def test_window_is_bounded_by_coverage_not_days_ahead(self):
+        # A PARTIAL fetch vouches only through `coverage`; days past it aren't "empty".
+        classes = [{"date": self._day(4)}]
+        leading, populated_after = scraper._leading_empty_days(classes, self._coverage(4))
+        self.assertEqual(leading, 4)
+        self.assertTrue(populated_after)
+
+
 class TestWriteStudioDedup(unittest.TestCase):
     """_write_studio must never hand replace_future_classes two rows with the same
     stable id: they go out in one insert...on conflict statement, and Postgres kills
@@ -490,6 +537,62 @@ class TestWriteStudioDedup(unittest.TestCase):
         # Only the case/whitespace twin is a real duplicate; the other-city and
         # other-date rows are genuinely different classes and must survive.
         self.assertEqual(len(resolved), 3)
+
+
+class TestReadSettledText(unittest.TestCase):
+    """The initial page read must not be a coin flip on lazily-hydrated widgets."""
+
+    class FakePage:
+        """Yields a scripted sequence of texts, one per read, so a test can model a
+        widget that hydrates late (or an iframe that collapses)."""
+        def __init__(self, texts):
+            self.texts = list(texts)
+            self.reads = 0
+            self.waited_ms = 0
+
+        def wait_for_timeout(self, ms):
+            self.waited_ms += ms
+
+        def next_text(self):
+            i = min(self.reads, len(self.texts) - 1)
+            self.reads += 1
+            return self.texts[i]
+
+    def _run(self, texts):
+        page = self.FakePage(texts)
+        with patch.object(scraper, "get_all_frames_text", lambda p: p.next_text()), \
+             patch.object(scraper, "_strip_nav_boilerplate", lambda t: t):
+            return scraper._read_settled_text(page), page
+
+    def test_waits_for_late_hydrating_content(self):
+        # How About Dance's real timing: identical at 1.5s and 3s (nav only), filling in
+        # around 5s. Any "stop when two reads agree" shortcut returns "nav" here.
+        text, _ = self._run(["nav", "nav", "nav", "nav CLASS LIST HERE"])
+        self.assertEqual(text, "nav CLASS LIST HERE")
+
+    def test_stable_text_is_returned_unchanged(self):
+        text, _ = self._run(["settled"])
+        self.assertEqual(text, "settled")
+
+    def test_keeps_the_fullest_reading_when_text_shrinks(self):
+        # Volga: a second iframe's text is present at first, then collapses away. The
+        # richer early reading is the one that has been feeding the parser correctly.
+        text, _ = self._run(["long text with extra iframe", "short text", "short text"])
+        self.assertEqual(text, "long text with extra iframe")
+
+    def test_gives_up_at_the_cap_on_never_settling_text(self):
+        # A page with a live clock/ticker never stabilizes; must not spin forever.
+        counter = {"n": 0}
+
+        def ever_changing(_page):
+            counter["n"] += 1
+            return "x" * counter["n"]
+
+        page = self.FakePage([])
+        with patch.object(scraper, "get_all_frames_text", ever_changing), \
+             patch.object(scraper, "_strip_nav_boilerplate", lambda t: t):
+            scraper._read_settled_text(page)
+        self.assertLessEqual(page.waited_ms, scraper._INITIAL_READ_MAX_MS)
 
 
 if __name__ == "__main__":

@@ -748,6 +748,51 @@ def _day_body(tagged_text: str) -> str:
     return tagged_text[m.end():] if m else tagged_text
 
 
+# Initial page read: how long to keep re-reading the text before trusting it. A fixed
+# sleep-then-read is a coin flip on any lazily-hydrated widget -- How About Dance's Wix
+# calendar renders its class list somewhere between 3s and 5s after `load` fires, so a
+# 1.5s read captured the nav menu alone (531 chars, zero classes) and the scrape then
+# reported a confident, complete-looking day with nothing in it. The day-tile loop below
+# already waits for content to *stabilize* after each click for the same reason; this
+# applies that to the very first read, which every path depends on.
+_INITIAL_READ_MIN_MS = 1500     # unchanged from the old fixed wait: the common case
+_INITIAL_READ_POLL_MS = 1000
+_INITIAL_READ_MAX_MS = 9000     # HAD needs ~5s; cap well past that, far under the 240s studio timeout
+
+
+def _read_settled_text(page) -> str:
+    """The fullest text this page renders within _INITIAL_READ_MAX_MS.
+
+    Two deliberate choices, both learned from real pages rather than guessed:
+
+    It polls for the whole window instead of stopping as soon as two consecutive reads
+    agree. "Unchanged" does not mean "finished": How About Dance's calendar reads
+    identically at 1.5s and at 3s (531 chars, nav only) and only fills in at ~5s, so any
+    stability-based early exit returns the empty version with full confidence -- exactly
+    the bug this function exists to remove. A few extra seconds per URL, once per studio
+    and parallel across studios, is worth nothing next to a silently empty week.
+
+    It returns the LONGEST snapshot rather than the last, because text can legitimately
+    shrink as well as grow: Volga briefly renders a second iframe (11624 chars) that
+    collapses to one (7340) a second later, and the earlier, richer reading is the one
+    that has been feeding the parser correctly all along. Taking the max makes this
+    strictly non-lossy versus the old fixed 1.5s read -- it can only ever see more."""
+    page.wait_for_timeout(_INITIAL_READ_MIN_MS)
+    waited = _INITIAL_READ_MIN_MS
+    first = best = _strip_nav_boilerplate(get_all_frames_text(page))
+    while waited + _INITIAL_READ_POLL_MS <= _INITIAL_READ_MAX_MS:
+        page.wait_for_timeout(_INITIAL_READ_POLL_MS)
+        waited += _INITIAL_READ_POLL_MS
+        cur = _strip_nav_boilerplate(get_all_frames_text(page))
+        if len(cur) > len(best):
+            best = cur
+    if len(best) > len(first):
+        print(f"  → page text was still filling in at {_INITIAL_READ_MIN_MS}ms "
+              f"({len(first)} chars); using fullest reading by {waited}ms "
+              f"({len(best)} chars)")
+    return best
+
+
 def fetch_page_text(url: str, days_ahead: int = 1) -> str:
     if "my.eds.dance" in url:
         return ""  # EDS handled directly in _fetch_studio via _fetch_eds_classes
@@ -783,8 +828,7 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
             page.on("request", on_request)
 
             page.goto(url, wait_until="load", timeout=30000)
-            page.wait_for_timeout(1500)
-            all_text = _strip_nav_boilerplate(get_all_frames_text(page))
+            all_text = _read_settled_text(page)
 
             # For Wix sites: the Bookings API is the authoritative source for the WHOLE
             # window, not just the weeks past what the page renders. This used to start
@@ -1200,6 +1244,42 @@ def _parse_raw_by_day(page_text: str, studio_id: str, studio_name: str) -> list[
 
 _DAYS_AHEAD = 10
 
+# A leading run of empty days this long (with populated days after it) is reported as
+# suspicious. Threshold is 3 rather than 1 because a single empty day at the front is
+# routine and expected: a studio's booking page legitimately stops offering today's
+# classes once its same-day cutoff passes. Two is still plausible (a closed Sunday
+# plus a cutoff). Three or more consecutive dead days followed by a normal-looking
+# week is the signature of a broken fetch mechanism, not a studio's schedule.
+_LEADING_EMPTY_DAYS_WARN = 3
+
+
+def _leading_empty_days(classes: list[dict], coverage: str) -> tuple[int, bool]:
+    """(count of consecutive empty days at the START of [today, coverage], whether any
+    day after that run has classes).
+
+    Deliberately only looks at a LEADING run, not at interior gaps: plenty of studios
+    genuinely go dark midweek (VIBE AT THE WALL's page is mostly studio rentals, Full
+    Out has real mid-window gaps), so warning on any hole in the window would be noise
+    that trains you to ignore the warning. Empty-at-the-front-then-fine-later is the
+    shape that specifically means "one of this studio's two fetch mechanisms returned
+    nothing", which no real schedule looks like."""
+    if not classes or not coverage:
+        return 0, False
+    populated = {c.get("date") for c in classes}
+    today = date.today()
+    try:
+        last = date.fromisoformat(coverage)
+    except ValueError:
+        return 0, False
+    window = [(today + timedelta(days=i)).isoformat() for i in range((last - today).days + 1)]
+    leading = 0
+    for d in window:
+        if d in populated:
+            break
+        leading += 1
+    return leading, any(d in populated for d in window[leading:])
+
+
 def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
     """Phase 1 (parallel): fetch pages + parse + normalize. No DB calls.
 
@@ -1247,6 +1327,17 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
             else:
                 status = f"PARTIAL — reached {coverage}, short of {cutoff}"
         print(f"[{tag}] {name}: {len(classes)} classes, coverage {max(days, 0)}/{_DAYS_AHEAD} days ({status})")
+        if coverage:
+            leading, populated_after = _leading_empty_days(classes, coverage)
+            if leading >= _LEADING_EMPTY_DAYS_WARN and populated_after:
+                print(f"  → WARNING [{tag}] {name}: the first {leading} days of the window "
+                      f"have no classes at all, but later days do — the coverage watermark "
+                      f"is only max(class date), so this still scored {max(days, 0)}/"
+                      f"{_DAYS_AHEAD}. That shape means one fetch mechanism produced "
+                      f"nothing while another worked (How About Dance, 2026-08: the Wix "
+                      f"page-text read covered days 1-7 and silently returned zero classes "
+                      f"while the API covered days 8-10 fine). Verify before trusting this "
+                      f"studio's near-term days.")
 
     try:
         urls = studio.get("schedule_urls") or []
