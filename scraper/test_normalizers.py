@@ -15,6 +15,7 @@ test runs with only the standard library installed.
 import sys
 import types
 import unittest
+from collections import Counter
 from unittest.mock import patch
 
 
@@ -450,6 +451,84 @@ class TestFlagAndDropAnomalies(unittest.TestCase):
         classes = [self._class("Foundations: Grooves", "00:30:00", "Kait Skye", "2026-07-31")]
         result = scraper._flag_and_drop_anomalies("sid", "Test Studio", classes)
         self.assertEqual(len(result), 1)
+
+
+class TestHealcodeIdentity(unittest.TestCase):
+    """The Healcode load_markup endpoint answers a widget id from the wrong id space
+    with HTTP 200 and another business's full schedule (On One Studio's booking-app id
+    returns 68 CrossFit sessions from CrossFit Brave). Shape checks can't see that, so
+    identity is asserted separately."""
+
+    def test_accepts_the_studios_own_location(self):
+        self.assertTrue(scraper._healcode_identity_ok(
+            "Western Ballet", Counter({"Western Ballet": 56})))
+
+    def test_rejects_another_businesss_schedule(self):
+        self.assertFalse(scraper._healcode_identity_ok(
+            "Western Ballet", Counter({"CrossFit Brave": 68})))
+
+    def test_rejects_a_partial_match(self):
+        # A mix means the widget is serving this studio plus something else; both halves
+        # are suspect, so the whole fetch is refused rather than filtered.
+        self.assertFalse(scraper._healcode_identity_ok(
+            "Western Ballet", Counter({"Western Ballet": 40, "CrossFit Brave": 16})))
+
+    def test_match_is_case_insensitive_and_substring(self):
+        self.assertTrue(scraper._healcode_identity_ok(
+            "Western Ballet", Counter({"WESTERN BALLET - Mountain View": 12})))
+
+    def test_unconfigured_studio_passes_with_a_warning(self):
+        # Don't hard-fail a studio whose marker nobody has set yet; the warning names it.
+        self.assertTrue(scraper._healcode_identity_ok(
+            "Some New Studio", Counter({"Some New Studio": 3})))
+
+    def test_fetch_returns_nothing_when_identity_fails(self):
+        # End-to-end through the parser: a wrong-studio response must yield zero classes,
+        # which _fetch_studio reads as a failed fetch (existing rows preserved, run red).
+        markup = (
+            '<div class="bw-session" id="1">'
+            '<time class="hc_starttime" datetime="2026-08-12T05:30"> 5:30 AM</time>'
+            '<time class="hc_endtime" datetime="2026-08-12T06:30"> 6:30 AM</time>'
+            '<div class="bw-session__name">CrossFit Class</div>'
+            '<div class="bw-session__staff">CJ</div>'
+            '<div class="bw-session__location" style="display: none;">CrossFit Brave</div>'
+            '</div>'
+        )
+
+        class FakeResp:
+            def json(self):
+                return {"class_sessions": markup}
+
+        with patch.object(scraper.http_requests, "get", lambda *a, **k: FakeResp(),
+                          create=True):
+            classes = scraper._fetch_healcode_widget("http://x/load_markup",
+                                                     "Western Ballet", "sid", days_ahead=10)
+        self.assertEqual(classes, [])
+
+    def test_fetch_parses_normally_when_identity_holds(self):
+        markup = (
+            '<div class="bw-session" id="1">'
+            '<time class="hc_starttime" datetime="2026-08-12T18:30"> 6:30 PM</time>'
+            '<time class="hc_endtime" datetime="2026-08-12T20:00"> 8:00 PM</time>'
+            '<div class="bw-session__name">Beginning - Intermediate (In Person)</div>'
+            '<div class="bw-session__staff">Jane Doe</div>'
+            '<div class="bw-session__location" style="display: none;">Western Ballet</div>'
+            '</div>'
+        )
+
+        class FakeResp:
+            def json(self):
+                return {"class_sessions": markup}
+
+        with patch.object(scraper.http_requests, "get", lambda *a, **k: FakeResp(),
+                          create=True):
+            classes = scraper._fetch_healcode_widget("http://x/load_markup",
+                                                     "Western Ballet", "sid", days_ahead=10)
+        self.assertEqual(len(classes), 1)
+        self.assertEqual(classes[0]["date"], "2026-08-12")
+        self.assertEqual(classes[0]["start_time"], "18:30:00")
+        self.assertEqual(classes[0]["duration_minutes"], 90)
+        self.assertEqual(classes[0]["dance_style"], "Ballet")
 
 
 class TestLeadingEmptyDays(unittest.TestCase):

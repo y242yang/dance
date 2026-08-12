@@ -5,6 +5,7 @@ import uuid
 import multiprocessing as mp
 import requests as http_requests
 import anthropic
+from collections import Counter
 from datetime import date, timedelta
 from urllib.parse import urlparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -618,7 +619,50 @@ def _fetch_eds_classes(studio_id: str, days_ahead: int = 14) -> list[dict]:
     return classes
 
 
-def _fetch_healcode_widget(url: str, studio_id: str, days_ahead: int = 14) -> list[dict]:
+# Expected `bw-session__location` text per studio on the Healcode path — an identity
+# assertion, not a filter. The widget id in a load_markup URL lives in a DIFFERENT id
+# space from the id in a go.mindbodyonline.com/book/widgets/schedules/view/<id> URL, and
+# the endpoint answers an id from the wrong space with HTTP 200 rather than a 404: an
+# unknown id returns zero sessions, and an id that happens to exist returns some OTHER
+# business's complete schedule. Feeding On One Studio's booking-app id to load_markup
+# returns 68 CrossFit sessions in Eastern time from a gym called CrossFit Brave — a
+# perfectly well-formed, fully-populated 10-day schedule belonging to someone else.
+#
+# Every other check in this file measures the SHAPE of a scrape (class counts, coverage
+# dates, leading gaps, duplicate ids). Wrong-studio data passes all of them, which makes
+# it the one failure mode nothing else here can see. Hence a check on identity.
+_HEALCODE_EXPECTED_LOCATION = {
+    "Western Ballet": "western ballet",
+}
+
+
+def _healcode_identity_ok(name: str, locations: "Counter | dict") -> bool:
+    """Whether a load_markup response's session locations look like `name`'s own.
+
+    Requires EVERY session to match the configured marker, not merely one, since a
+    partial match would mean the widget is serving a mix of this studio and something
+    else. Returning False makes the fetch look empty to _fetch_studio, which preserves
+    the studio's existing rows and (since main.exit_code) turns the run red -- the
+    conservative direction: a false alarm costs one look at a red build, while the
+    alternative costs showing another business's classes to users under this studio's
+    name, indistinguishably from a healthy day."""
+    expected = _HEALCODE_EXPECTED_LOCATION.get(name)
+    if not expected:
+        print(f"  → WARNING: no expected location configured for Healcode studio {name!r} "
+              f"— add one to _HEALCODE_EXPECTED_LOCATION so a wrong widget id can't "
+              f"silently serve another business's schedule. Saw: {dict(locations)}")
+        return True
+    unexpected = {loc: n for loc, n in locations.items() if expected not in loc.lower()}
+    if unexpected:
+        print(f"  → WARNING: {name} widget returned sessions at unexpected location(s) "
+              f"{unexpected} (expected something containing {expected!r}). Treating this "
+              f"as a failed fetch rather than importing another studio's classes — check "
+              f"whether the widget id is still correct.")
+        return False
+    return True
+
+
+def _fetch_healcode_widget(url: str, studio_name: str, studio_id: str, days_ahead: int = 14) -> list[dict]:
     """Fetch a Mindbody "Healcode" branded-web-widget schedule directly via its
     load_markup JSON endpoint (e.g. https://widgets.mindbodyonline.com/widgets/schedules/<id>/load_markup).
 
@@ -640,7 +684,16 @@ def _fetch_healcode_widget(url: str, studio_id: str, days_ahead: int = 14) -> li
         headers={"User-Agent": "Mozilla/5.0"},
         timeout=30,
     )
-    html = resp.json().get("class_sessions", "")
+    html = resp.json().get("class_sessions", "") or ""
+    # Identity check before parsing a single session: a widget id from the wrong id space
+    # returns another business's schedule with a 200, and no downstream check can tell
+    # that apart from a good day. See _HEALCODE_EXPECTED_LOCATION.
+    locations = Counter(
+        loc.strip() for loc in re.findall(r'bw-session__location"[^>]*>([^<]+)<', html)
+        if loc.strip()
+    )
+    if locations and not _healcode_identity_ok(studio_name, locations):
+        return []
     classes = []
     for chunk in re.split(r'(?=<div class="bw-session" id=)', html)[1:]:
         start_m = re.search(r'class="hc_starttime" datetime="(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})"', chunk)
@@ -1356,7 +1409,8 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
         # explicit machine-readable fields, so a non-empty result is authoritative
         # through the full cutoff, same as EDS above.
         if any("widgets.mindbodyonline.com/widgets/schedules" in u for u in urls):
-            classes = _apply_exclude(_fetch_healcode_widget(urls[0], sid, days_ahead=_DAYS_AHEAD))
+            classes = _apply_exclude(
+                _fetch_healcode_widget(urls[0], name, sid, days_ahead=_DAYS_AHEAD))
             coverage = cutoff if classes else None
             _report(classes, coverage)
             return sid, classes, coverage
