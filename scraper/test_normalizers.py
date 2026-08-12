@@ -453,6 +453,60 @@ class TestFlagAndDropAnomalies(unittest.TestCase):
         self.assertEqual(len(result), 1)
 
 
+class TestEdsFetch(unittest.TestCase):
+    """my.eds.dance is a shared booking platform, so EDS's query has to assert which
+    tenant it's asking about — the same identity concern as the Healcode path."""
+
+    def _fetch(self, payload):
+        captured = {}
+
+        class FakeResp:
+            def json(self):
+                return payload
+
+        def fake_post(url, json=None, headers=None, timeout=None):
+            captured["body"] = json
+            return FakeResp()
+
+        with patch.object(scraper.http_requests, "post", fake_post, create=True):
+            return scraper._fetch_eds_classes("sid", days_ahead=10), captured
+
+    def test_query_is_scoped_to_the_eds_brand(self):
+        # Regression guard: dropping this filter silently widens the query to every
+        # business on the platform, and nothing downstream could tell.
+        _, captured = self._fetch({"data": {"eventCollection": {"edges": []}}})
+        self.assertIn("brandId", captured["body"]["query"])
+        self.assertEqual(captured["body"]["variables"]["brand"], scraper._EDS_BRAND_ID)
+
+    def test_graphql_errors_yield_no_classes_rather_than_raising(self):
+        classes, _ = self._fetch({"errors": [{"message": "unknown field brandId"}]})
+        self.assertEqual(classes, [])
+
+    def test_parses_an_event_into_pacific_time_and_resolves_city(self):
+        import json as _json
+        node = {
+            "autoFinalTitle": _json.dumps({"en": "[0] Nikki Wed 6:00 PM 'Beginner Hiphop w/ Nikki'"}),
+            "autoFinalSubtitle": _json.dumps({"en": "Song Name 3/12"}),
+            "startAt": "2026-08-13T01:00:00+00:00",   # 6:00 PM PT on 08-12 (PDT = UTC-7)
+            "durationMinute": 90,
+            "autoSpaceLandmark": {"funcTitleShortEnFirst": "EDS Fremont"},
+            "metadata": {"autoFinalTitle": _json.dumps({"en": "Beginner Hip Hop"})},
+            "eventMemberCollection": {"edges": []},
+        }
+        classes, _ = self._fetch({"data": {"eventCollection": {"edges": [{"node": node}]}}})
+        self.assertEqual(len(classes), 1)
+        c = classes[0]
+        self.assertEqual(c["date"], "2026-08-12")
+        self.assertEqual(c["start_time"], "18:00:00")
+        self.assertEqual(c["duration_minutes"], 90)
+        self.assertEqual(c["_loc_city"], "Fremont")
+        # Style and level come from the class-series category, not the session's own
+        # creative title (which is often just a song name).
+        self.assertEqual(c["dance_style"], "Hip Hop")
+        self.assertEqual(c["level"], "beginner")
+        self.assertEqual(c["title"], "Song Name")
+
+
 class TestHealcodeIdentity(unittest.TestCase):
     """The Healcode load_markup endpoint answers a widget id from the wrong id space
     with HTTP 200 and another business's full schedule (On One Studio's booking-app id

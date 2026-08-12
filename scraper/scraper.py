@@ -499,10 +499,24 @@ def _scrape_rae_studios(url: str, days_ahead: int = 14) -> str:
 
 _EDS_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRpbGVwY3d5a3Nwc2dibGxwdGJmIiwicm9sZSI6ImFub24iLCJpYXQiOjE2NTQzNzYxNzgsImV4cCI6MTk2OTk1MjE3OH0.WCOgcOIzxgmlFFbs5Fc5AiyJb-bZyyl9m11R7gvBoxI"
 _EDS_GQL_URL = "https://tilepcwykspsgbllptbf.supabase.co/graphql/v1"
+# my.eds.dance is a booking PLATFORM, not one studio's site: its API serves several
+# unrelated businesses out of one event table. Enjoy Dance Studio is this brand; the other
+# tenant seen so far (Dance Attack, at MTV/Los Altos community centers) is a different one.
+# Filtering on brand is an identity assertion -- the same class of check as
+# _HEALCODE_EXPECTED_LOCATION, added for the same reason: without it, EDS's rows are
+# "whatever this shared table happens to return", and if the platform's other tenants
+# start using kind: "dance_class" (the only thing currently separating them), their
+# classes would be imported under Enjoy Dance Studio's name and every shape-based guard
+# here would score the run as perfect. Verified 2026-08-12: identical results with and
+# without this filter (61 events), so it changes nothing today and holds the line later.
+# If EDS ever re-creates its account under a new brand, this returns zero events, which
+# _fetch_studio treats as a failed fetch: existing rows preserved, run red.
+_EDS_BRAND_ID = "fe3bffe3-cbcb-48b5-9a6d-640c42106130"
+
 _EDS_GQL_QUERY = """
-query GetClasses($start: Datetime, $end: Datetime) {
+query GetClasses($start: Datetime, $end: Datetime, $brand: UUID) {
   eventCollection(
-    filter: {startAt: {gte: $start, lte: $end}, canceledAt: {is: NULL}, kind: {eq: "dance_class"}}
+    filter: {startAt: {gte: $start, lte: $end}, canceledAt: {is: NULL}, kind: {eq: "dance_class"}, brandId: {eq: $brand}}
     orderBy: {startAt: AscNullsLast}
     first: 200
   ) {
@@ -549,12 +563,20 @@ def _fetch_eds_classes(studio_id: str, days_ahead: int = 14) -> list[dict]:
             "variables": {
                 "start": today.isoformat() + "T07:00:00+00:00",  # midnight PT (PDT = UTC-7)
                 "end": cutoff.isoformat() + "T06:59:59+00:00",   # 11:59 PM PT
+                "brand": _EDS_BRAND_ID,
             },
         },
         headers={"apikey": _EDS_ANON_KEY, "Content-Type": "application/json"},
         timeout=30,
     )
     payload = resp.json()
+    # A rejected query (renamed field, changed filter shape, revoked key) returns 200 with
+    # an `errors` array and no data, which otherwise reads as "no classes" and shows up
+    # only as a bare FAILED line with no reason. Print the cause -- the fetch still
+    # returns nothing, so existing rows are preserved either way.
+    if payload.get("errors"):
+        print(f"  → WARNING: EDS GraphQL returned errors, treating as a failed fetch: "
+              f"{json.dumps(payload['errors'])[:400]}")
     edges = ((payload.get("data") or {}).get("eventCollection") or {}).get("edges") or []
     classes = []
     for e in edges:
