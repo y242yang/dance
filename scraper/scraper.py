@@ -1567,13 +1567,22 @@ def _concurrency_limit() -> int:
         n = _DEFAULT_CONCURRENCY
     return max(1, n)
 
-def scrape_all(studios: list[dict]):
+def scrape_all(studios: list[dict]) -> dict:
+    """Scrape every studio, returning {"complete": [...], "partial": [...],
+    "failed": [...], "total": N} of studio names.
+
+    The return value exists so the caller can set a process exit code: this summary
+    was print-only until 2026-08-11, which meant a studio whose write was rejected
+    outright still finished the run green. Enjoy Dance Studio's writes failed on two
+    consecutive days with the reason logged correctly both times, and nothing
+    surfaced it -- the app just kept serving progressively staler data. See
+    main.exit_code() for which of these buckets is worth failing a run over."""
     # Fetch + parse all studios in parallel (each in its own timeout-guarded subprocess),
     # writing each studio's result to the DB as soon as it's ready rather than waiting
     # for the slowest one — one stuck studio no longer delays or blocks everyone else's data.
     if not studios:
         print("No studios to scrape.")
-        return
+        return {"complete": [], "partial": [], "failed": [], "total": 0}
     # max_workers must be >= 1 (ThreadPoolExecutor(0) raises) and no larger than the
     # number of studios; the env-tunable limit caps memory/CPU on small machines.
     max_workers = min(len(studios), _concurrency_limit())
@@ -1615,3 +1624,5 @@ def scrape_all(studios: list[dict]):
         print(f"  PARTIAL (didn't reach {cutoff}): {', '.join(sorted(partial))}")
     if failed:
         print(f"  FAILED (kept existing data): {', '.join(sorted(failed))}")
+    return {"complete": complete, "partial": partial, "failed": failed,
+            "total": len(studios)}
