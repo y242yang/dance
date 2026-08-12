@@ -452,5 +452,45 @@ class TestFlagAndDropAnomalies(unittest.TestCase):
         self.assertEqual(len(result), 1)
 
 
+class TestWriteStudioDedup(unittest.TestCase):
+    """_write_studio must never hand replace_future_classes two rows with the same
+    stable id: they go out in one insert...on conflict statement, and Postgres kills
+    the whole statement (SQLSTATE 21000), failing the studio's entire write."""
+
+    def _write(self, classes):
+        captured = {}
+
+        def fake_replace(sid, resolved, covered_through):
+            captured["resolved"] = resolved
+
+        with patch.object(scraper, "replace_future_classes", fake_replace), \
+             patch.object(scraper, "get_default_location", lambda sid: "loc-default"), \
+             patch.object(scraper, "get_or_create_location", lambda *a, **k: "loc-city"):
+            scraper._write_studio({"id": "studio-1", "name": "Test Studio"}, classes, "2026-08-20")
+        return captured["resolved"]
+
+    def test_drops_duplicate_ids_within_one_payload(self):
+        # Reproduces the Enjoy Dance Studio 2026-08-10/11 failure: the studio's own API
+        # listed one class twice at the same date/time/location.
+        dup = {"title": "Beginner Plus Hiphop Camp", "date": "2026-08-19",
+               "start_time": "20:30:00", "_loc_city": "Fremont"}
+        resolved = self._write([dict(dup), dict(dup)])
+        self.assertEqual(len(resolved), 1)
+
+    def test_ids_are_unique_across_a_mixed_payload(self):
+        classes = [
+            {"title": "Beg Hip Hop", "date": "2026-08-19", "start_time": "20:30:00", "_loc_city": "Fremont"},
+            {"title": "  beg hip hop  ", "date": "2026-08-19", "start_time": "20:30:00", "_loc_city": "fremont"},
+            {"title": "Beg Hip Hop", "date": "2026-08-19", "start_time": "20:30:00", "_loc_city": "Cupertino"},
+            {"title": "Beg Hip Hop", "date": "2026-08-20", "start_time": "20:30:00"},
+        ]
+        resolved = self._write(classes)
+        ids = [c["id"] for c in resolved]
+        self.assertEqual(len(ids), len(set(ids)))
+        # Only the case/whitespace twin is a real duplicate; the other-city and
+        # other-date rows are genuinely different classes and must survive.
+        self.assertEqual(len(resolved), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

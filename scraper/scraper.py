@@ -786,7 +786,17 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
             page.wait_for_timeout(1500)
             all_text = _strip_nav_boilerplate(get_all_frames_text(page))
 
-            # for Wix sites: use the API directly to get additional weeks
+            # For Wix sites: the Bookings API is the authoritative source for the WHOLE
+            # window, not just the weeks past what the page renders. This used to start
+            # at today+7 and rely on the page's own rendered text for days 1-7, on the
+            # assumption that the widget always shows the current week inline. When that
+            # assumption breaks the failure is invisible: How About Dance's calendar
+            # pages went to rendering only their nav menu (80 chars of text, zero class
+            # content), so days 1-7 silently came back empty while days 8-10 arrived
+            # fine from the API -- and because the coverage watermark is just
+            # max(class date), the scrape still scored a perfect 10/10 "complete" and
+            # pruned the near days as stale. Asking the API for the full window removes
+            # the dependency on the widget rendering at all.
             if wix_auth[0] and days_ahead > 1:
                 today = date.today()
                 # infer city from URL path (e.g. calendar-san-jose → "san jose")
@@ -795,13 +805,23 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
                 for segment in path.split("/"):
                     if segment.startswith("calendar-"):
                         city_filter = segment[len("calendar-"):].replace("-", " ")
-                extra = _fetch_wix_slots(wix_base[0], wix_auth[0],
-                                         today + timedelta(days=7),
+                slots = _fetch_wix_slots(wix_base[0], wix_auth[0],
+                                         today,
                                          today + timedelta(days=days_ahead),
                                          city_filter=city_filter)
-                if extra:
-                    all_text += "\n\n" + extra
-                    print(f"  → added Wix API data for days 8-{days_ahead} (city: {city_filter})")
+                if slots:
+                    # Return the API data alone rather than appending it to the page
+                    # text: it now covers the same days the page does, and every slot
+                    # carries an explicit date, address and instructor, so mixing in a
+                    # second rendering of the same classes only risks the two parsing
+                    # to near-but-not-identical duplicates that dedup can't collapse.
+                    print(f"  → using Wix API data for days 1-{days_ahead} (city: {city_filter})")
+                    return slots
+                # API gave nothing (token rejected, filter matched no location) — fall
+                # back to whatever the page itself rendered rather than returning
+                # nothing, which _fetch_studio would read as a failed fetch.
+                print(f"  → WARNING: Wix API returned no slots (city: {city_filter}), "
+                      f"falling back to rendered page text ({len(all_text)} chars)")
                 return all_text
 
             if days_ahead <= 1:
@@ -1356,12 +1376,35 @@ def _write_studio(studio: dict, classes: list[dict], covered_through: str):
     tag = sid[:8]
     classes = _flag_and_drop_anomalies(sid, name, classes)
     resolved = []
+    seen_ids = set()
     # Process classes with an explicit city first, so if this studio has no pre-existing
     # location yet, get_or_create_location() creates one before any class falls back to
     # get_default_location() — otherwise the fallback can cache a stale "no location"
     # result from before the real one existed.
     for c in sorted(classes, key=lambda c: c.get("_loc_city") is None):
-        c["id"] = _stable_class_id(sid, c)
+        cid = _stable_class_id(sid, c)
+        # Last line of defense against an id collision within a single payload.
+        # replace_future_classes upserts all of these rows in ONE insert...on conflict
+        # statement, and Postgres aborts the whole statement with SQLSTATE 21000 ("ON
+        # CONFLICT DO UPDATE command cannot affect row a second time") if two proposed
+        # rows share an id -- which fails the entire studio's write, so a scrape that
+        # fetched a complete schedule silently keeps serving the previous run's stale
+        # data instead (Enjoy Dance Studio, 2026-08-10 and 2026-08-11: EDS's API listed
+        # the same class twice at the same date/time/location, and every run since
+        # 8/09 was rejected). Each fetch path already dedups its own parsed output, but
+        # this guard covers all of them at once -- including the direct-API paths (EDS,
+        # Healcode) that bypass _parse_raw_by_day's dedup entirely, and any future one --
+        # because it sits at exactly the point where a duplicate becomes fatal.
+        # Two rows sharing a stable id are by definition indistinguishable to every
+        # consumer (same studio, title, date, time, location), so dropping the second
+        # loses nothing a client could have told apart.
+        if cid in seen_ids:
+            print(f"  → WARNING [{tag}] {name}: dropping duplicate class "
+                  f"{c.get('date')} {c.get('start_time')} {c.get('title')!r} "
+                  f"(same stable id as an earlier one in this scrape)")
+            continue
+        seen_ids.add(cid)
+        c["id"] = cid
         loc_city = c.pop("_loc_city", None)
         loc_address = c.pop("_loc_address", None)
         if loc_city:
