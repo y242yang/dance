@@ -1311,34 +1311,82 @@ def fetch_page_text(url: str, days_ahead: int = 1) -> str:
 
 _CHUNK_LIMIT = 5000
 
+# How many of one studio's Haiku calls may be in flight at once. A studio's chunks (or
+# per-day segments) are independent parses of disjoint text, so the only reason they ever
+# ran one after another was that the loop was written that way — and on a big studio that
+# was the difference between finishing and being killed. Full Out Studios, 2026-08-29:
+# 74k chars of Acuity text = 15 chunks x ~13s = 200s of parsing on top of a 38s fetch,
+# against the 240s per-studio timeout. It landed at 237s, so it failed or passed
+# essentially at random, and the CI run that failed had reached the cutoff fine — the
+# page was scraped, the parse just didn't finish.
+#
+# Kept modest rather than unbounded: scrape_all already runs SCRAPE_CONCURRENCY studios
+# at once (3 in CI), so the real ceiling on concurrent Haiku calls is that times this.
+_PARSE_MAX_WORKERS = 4
+
+
+def _parse_segments(segments: list[str], studio_id: str, studio_name: str) -> list[list[dict]]:
+    """Parse independent text segments with Haiku concurrently.
+
+    Returns one list of classes per input segment, in the SAME order as `segments` —
+    order is not an implementation detail here: both callers dedup by
+    _class_identity_key and keep the FIRST occurrence, so shuffling the results would
+    make which duplicate survives depend on network timing rather than on the page.
+
+    A segment that raises is logged and yields [], exactly as the sequential version
+    did: one bad chunk must not sink the rest of a studio's parse.
+    """
+    if not segments:
+        return []
+    if len(segments) == 1:
+        try:
+            return [_parse_raw(segments[0], studio_id, studio_name)]
+        except Exception as e:
+            print(f"  chunk parse error: {e}")
+            return [[]]
+    with ThreadPoolExecutor(max_workers=min(_PARSE_MAX_WORKERS, len(segments))) as executor:
+        futures = [executor.submit(_parse_raw, s, studio_id, studio_name) for s in segments]
+        out = []
+        for f in futures:  # iterate submission order, not completion order
+            try:
+                out.append(f.result())
+            except Exception as e:
+                print(f"  chunk parse error: {e}")
+                out.append([])
+    return out
+
+
+def _split_chunks(page_text: str) -> list[str]:
+    """Split oversized text at blank-line (paragraph) boundaries so a single class's
+    text block is never cut in half — falls back to a line boundary if no blank line is
+    in range."""
+    chunks, pos = [], 0
+    while pos < len(page_text):
+        end = min(pos + _CHUNK_LIMIT, len(page_text))
+        if end < len(page_text):
+            boundary = page_text.rfind("\n\n", pos, end)
+            if boundary <= pos:
+                boundary = page_text.rfind("\n", pos, end)
+            if boundary > pos:
+                end = boundary
+        chunk = page_text[pos:end].strip()
+        pos = end + 1
+        if chunk:
+            chunks.append(chunk)
+    return chunks
+
+
 def _parse_raw(page_text: str, studio_id: str, studio_name: str) -> list[dict]:
     """Call Claude Haiku and normalize fields. Chunks large inputs to stay within output token limit."""
     if len(page_text) > _CHUNK_LIMIT:
-        # Split at blank-line (paragraph) boundaries so a single class's text block
-        # is never cut in half — falls back to a line boundary if no blank line is in range.
         seen: set[tuple] = set()
         result: list[dict] = []
-        pos = 0
-        while pos < len(page_text):
-            end = min(pos + _CHUNK_LIMIT, len(page_text))
-            if end < len(page_text):
-                boundary = page_text.rfind("\n\n", pos, end)
-                if boundary <= pos:
-                    boundary = page_text.rfind("\n", pos, end)
-                if boundary > pos:
-                    end = boundary
-            chunk = page_text[pos:end].strip()
-            pos = end + 1
-            if not chunk:
-                continue
-            try:
-                for c in _parse_raw(chunk, studio_id, studio_name):
-                    key = _class_identity_key(c)
-                    if key not in seen:
-                        seen.add(key)
-                        result.append(c)
-            except Exception as e:
-                print(f"  chunk parse error: {e}")
+        for chunk_classes in _parse_segments(_split_chunks(page_text), studio_id, studio_name):
+            for c in chunk_classes:
+                key = _class_identity_key(c)
+                if key not in seen:
+                    seen.add(key)
+                    result.append(c)
         return result
 
     today = date.today().isoformat()
@@ -1469,10 +1517,16 @@ def _parse_raw_by_day(page_text: str, studio_id: str, studio_name: str) -> list[
     if page_text[:marker_positions[0].start()].strip():
         _add_deduped(_parse_raw(page_text[:marker_positions[0].start()], studio_id, studio_name))
 
-    for i, m in enumerate(marker_positions):
-        seg_start = m.end()
-        seg_end = marker_positions[i + 1].start() if i + 1 < len(marker_positions) else len(page_text)
-        day_classes = _parse_raw(page_text[seg_start:seg_end], studio_id, studio_name)
+    # Each day's segment is an independent parse, so they go out concurrently (see
+    # _parse_segments) and come back in marker order — which _add_deduped relies on,
+    # since it keeps the first of any duplicate pair.
+    segments = [
+        page_text[m.end():(marker_positions[i + 1].start()
+                           if i + 1 < len(marker_positions) else len(page_text))]
+        for i, m in enumerate(marker_positions)
+    ]
+    for m, day_classes in zip(marker_positions,
+                              _parse_segments(segments, studio_id, studio_name)):
         resolved_date = m.group(1)
         for c in day_classes:
             c["date"] = resolved_date
