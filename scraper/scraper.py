@@ -752,6 +752,168 @@ def _fetch_healcode_widget(url: str, studio_name: str, studio_id: str, days_ahea
     return classes
 
 
+# Expected host-name marker per studio on the Momence path — the same identity
+# assertion as _HEALCODE_EXPECTED_LOCATION, for the same reason. A Momence host URL
+# carries an opaque slug (momence.com/u/<slug>) that resolves to a numeric hostId, and
+# every id in that space answers with a well-formed 200: point it at the wrong host and
+# you get another business's complete, plausible schedule rather than an error. Shape
+# checks can't see that, so check the name the slug actually resolved to.
+_MOMENCE_EXPECTED_HOST = {
+    "Vell Studio SF": "vellstudio",
+}
+
+# The session kinds Momence's own host-schedule page requests. Anything omitted here is
+# invisible to us, so this mirrors the site's list rather than narrowing it: Vell's
+# regular classes come back as "fitness" while its guest-teacher masterclasses are
+# "special-event", and both are real bookable classes.
+_MOMENCE_SESSION_TYPES = [
+    "course-class", "fitness", "retreat", "special-event", "special-event-new",
+]
+
+_MOMENCE_SLUG_RE = re.compile(r"momence\.com/u/([A-Za-z0-9_-]+)")
+
+
+def _momence_identity_ok(studio_name: str, host_name: str) -> bool:
+    """Whether the host a Momence slug resolved to is the studio we think it is."""
+    expected = _MOMENCE_EXPECTED_HOST.get(studio_name)
+    if not expected:
+        print(f"  → WARNING: no expected host configured for Momence studio {studio_name!r} "
+              f"— add one to _MOMENCE_EXPECTED_HOST so a wrong slug can't silently serve "
+              f"another business's schedule. Saw: {host_name!r}")
+        return True
+    if expected not in (host_name or "").lower().replace(" ", ""):
+        print(f"  → WARNING: Momence slug for {studio_name} resolved to host {host_name!r}, "
+              f"which doesn't contain {expected!r}. Treating this as a failed fetch rather "
+              f"than importing another studio's classes — check whether the slug is still "
+              f"correct.")
+        return False
+    return True
+
+
+def _fetch_momence_host(url: str, studio_name: str, studio_id: str) -> list[dict]:
+    """Fetch a Momence host's schedule directly via its read-only JSON API.
+
+    momence.com/u/<slug> is a client-rendered React app, but the two calls it makes on
+    load are public and unauthenticated, so this skips Playwright and Haiku entirely
+    (same rationale as the EDS and Healcode paths — explicit machine-readable fields
+    beat asking an LLM to infer dates from prose):
+      1. api.momence.com/schedule/GetLatestStandalone?hostUrl=<slug> → the numeric
+         hostId, plus the host's display name, which is what the identity check reads.
+      2. readonly-api.momence.com/host-plugins/host/<hostId>/host-schedule/sessions →
+         every upcoming session from `fromDate` on, paginated.
+
+    Returns the host's WHOLE upcoming schedule, deliberately unclamped: the caller
+    needs to tell "the API is broken" (nothing at all) apart from "this studio has a
+    quiet week" (sessions exist, just none inside the window). Vell is small enough to
+    have genuinely empty stretches, and the usual empty-means-failure rule would call
+    those a failure every time. The caller clamps to the window before writing.
+
+    `startsAt` is UTC; Momence renders in the host's local time, so these are converted
+    to Pacific here. Without that, a 7pm class comes back as next-day 02:00 — the same
+    bug the Rae Studios widget had before its timezone was pinned.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    m = _MOMENCE_SLUG_RE.search(url)
+    if not m:
+        print(f"  → no Momence host slug in {url!r}")
+        return []
+    slug = m.group(1)
+    pacific = ZoneInfo("America/Los_Angeles")
+
+    # An unknown slug still answers 200, with `message` as the plain string "Host not
+    # found" rather than the usual object — so every step of this unwrap is type-checked
+    # instead of chained, or a retired slug takes the whole studio fetch down with an
+    # AttributeError instead of being reported as a failed fetch.
+    body = http_requests.get(
+        "https://api.momence.com/schedule/GetLatestStandalone",
+        params={"hostUrl": slug, "excludeCollections": "true"},
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=30,
+    ).json()
+    message = body.get("message") if isinstance(body, dict) else None
+    info = message.get("info") if isinstance(message, dict) else None
+    info = info if isinstance(info, dict) else {}
+    host_id, host_name = info.get("hostId"), info.get("name") or ""
+    if not host_id:
+        print(f"  → Momence slug {slug!r} did not resolve to a host id "
+              f"({(body or {}).get('error') if isinstance(body, dict) else 'unexpected response'})")
+        return []
+    # Identity before parsing a single session — see _MOMENCE_EXPECTED_HOST.
+    if not _momence_identity_ok(studio_name, host_name):
+        return []
+
+    # Midnight Pacific today, as UTC: the API takes an absolute instant, and asking from
+    # "now" would drop classes earlier today that the window still covers.
+    from_dt = datetime.combine(date.today(), datetime.min.time(), tzinfo=pacific)
+    params = [("sessionTypes[]", t) for t in _MOMENCE_SESSION_TYPES]
+    params += [("timeZone", "America/Los_Angeles"),
+               ("fromDate", from_dt.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%S.000Z")),
+               ("pageSize", "100")]
+
+    sessions, page = [], 0
+    while True:
+        resp = http_requests.get(
+            f"https://readonly-api.momence.com/host-plugins/host/{host_id}/host-schedule/sessions",
+            params=params + [("page", str(page))],
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=30,
+        ).json()
+        resp = resp if isinstance(resp, dict) else {}
+        batch = resp.get("payload")
+        batch = [s for s in batch if isinstance(s, dict)] if isinstance(batch, list) else []
+        sessions.extend(batch)
+        pagination = resp.get("pagination")
+        total = (pagination or {}).get("totalCount", len(sessions)) if isinstance(pagination, dict) \
+            else len(sessions)
+        page += 1
+        # Guard the loop on progress as well as the count, so a pagination change that
+        # keeps returning the same page can't spin forever inside the studio timeout.
+        if not batch or len(sessions) >= total or page > 20:
+            break
+
+    classes = []
+    for s in sessions:
+        # Every session must belong to the host we resolved; a mixed response would mean
+        # the endpoint is not scoped the way this code assumes.
+        if s.get("hostId") not in (None, host_id):
+            print(f"  → skipping Momence session {s.get('id')} belonging to host "
+                  f"{s.get('hostId')}, not {host_id}")
+            continue
+        title = (s.get("sessionName") or "").strip()
+        starts = s.get("startsAt") or ""
+        if not title or not starts:
+            continue
+        try:
+            dt_pt = datetime.fromisoformat(starts.replace("Z", "+00:00")).astimezone(pacific)
+        except ValueError:
+            continue
+        # Momence's `level` field is not a level label — it's the free-text class blurb.
+        # It is kept as the description but deliberately NOT fed to style/level matching:
+        # these titles are cleanly structured ("Open Heels class | beginner level"), while
+        # the blurbs are marketing prose that name other styles in passing and lose to
+        # them. Measured over Vell's own 18 upcoming sessions, including the blurb
+        # mislabels "JANE JAY Hip Hop Masterclass" and "BRITTANY DIANA Contemporary
+        # workshop" as Heels (both blurbs mention heels), turns "Open Sneaks class" into
+        # Groove (the word "grooves" appears in the prose), and demotes three explicit
+        # "| All levels" titles to beginner on the strength of "beginner-friendly" in the
+        # copy. The title alone gets every one of those right.
+        description = (s.get("level") or "").strip()
+        classes.append({
+            "studio_id": studio_id,
+            "title": title,
+            "instructor": " ".join((s.get("teacher") or "").split()) or None,
+            "date": dt_pt.strftime("%Y-%m-%d"),
+            "start_time": dt_pt.strftime("%H:%M:%S"),
+            "duration_minutes": _normalize_duration(s.get("durationMinutes")),
+            "dance_style": _normalize_style(None, title, ""),
+            "level": _normalize_level(None, title, ""),
+            "description": description or None,
+        })
+    return classes
+
+
 # Mindbody's day-tile widget repeats ~150 chars of identical nav chrome ("My
 # Account...Full Calendar...Today\n13\nTue\n14...") before every single day's content.
 # That's a quarter or more of the total captured text on a 14-day pull, and it's pure
@@ -1406,8 +1568,10 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
             for kw in exclude
         )]
 
-    def _report(classes, coverage):
+    def _report(classes, coverage, single_source=False):
         # Turn coverage into a human-readable N/14 days line and a status word.
+        # `single_source` means the whole window came from ONE call to an API that
+        # answers for all of it — which is what silences the leading-gap warning below.
         if coverage is None:
             status = "FAILED (existing data kept)"
             days = 0
@@ -1418,7 +1582,15 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
             else:
                 status = f"PARTIAL — reached {coverage}, short of {cutoff}"
         print(f"[{tag}] {name}: {len(classes)} classes, coverage {max(days, 0)}/{_DAYS_AHEAD} days ({status})")
-        if coverage:
+        # The leading-gap warning diagnoses ONE specific failure: a studio whose window
+        # is assembled from several mechanisms, where one silently returned nothing and
+        # another worked. That shape is unreachable when a single call answers for the
+        # whole window — a quiet first few days there is just a studio with no classes
+        # soon, which is ordinary at a small studio (Vell has 4-5 classes per 10 days,
+        # clustered). Warning on it anyway would fire nearly every day for exactly the
+        # studios it can say nothing about, and a warning that is always on is one you
+        # stop reading — the same reason exit_code deliberately doesn't fail on partial.
+        if coverage and not single_source:
             leading, populated_after = _leading_empty_days(classes, coverage)
             if leading >= _LEADING_EMPTY_DAYS_WARN and populated_after:
                 print(f"  → WARNING [{tag}] {name}: the first {leading} days of the window "
@@ -1455,6 +1627,23 @@ def _fetch_studio(studio: dict) -> tuple[str, list[dict], "str | None"]:
                 today_str, cutoff)
             coverage = cutoff if classes else None
             _report(classes, coverage)
+            return sid, classes, coverage
+
+        # Momence host page: skip Haiku — the host-schedule API returns every upcoming
+        # session in one paginated call with explicit fields. Unlike EDS/Healcode above,
+        # trustworthiness is judged on the RAW result, not the clamped one: this API
+        # answers for the whole future, so "no sessions at all" means it's broken, while
+        # "sessions exist but none in the next 10 days" is a real quiet stretch at a
+        # small studio and must not be reported as a failed fetch.
+        if any("momence.com/u/" in u for u in urls):
+            raw = _apply_exclude(_fetch_momence_host(urls[0], name, sid))
+            classes = _clamp_to_window(raw, today_str, cutoff)
+            coverage = cutoff if raw else None
+            if raw and not classes:
+                print(f"  → [{tag}] {name}: Momence returned {len(raw)} upcoming session(s), "
+                      f"none within {today_str}..{cutoff} — treating the window as "
+                      f"genuinely empty, not as a failed fetch.")
+            _report(classes, coverage, single_source=True)
             return sid, classes, coverage
 
         all_text = ""

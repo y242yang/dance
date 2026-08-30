@@ -8,3 +8,9 @@ supabase==2.31.0
 websockets==15.0.1
 python-dotenv==1.0.1
 requests==2.31.0
+# zoneinfo (stdlib) reads the OS tz database, which is present on the ubuntu-22.04
+# runner but is not guaranteed on every platform this might run on. The Momence path
+# converts UTC session times to America/Los_Angeles and a missing tz database would
+# raise ZoneInfoNotFoundError — failing that studio's fetch rather than mistiming it,
+# but failing it every day. This pure-data package is zoneinfo's documented fallback.
+tzdata==2024.1
